@@ -31,7 +31,7 @@ int main(int argc, char** argv)
     int ret;
     ret = getaddrinfo(argv[1], argv[2], &serv_hints, &serv_res);
     if (ret != 0) {
-        printf("server getaddrinfo() error: %s\n", gai_strerror(ret));
+        fprintf(stderr, "server getaddrinfo() error: %s\n", gai_strerror(ret));
         return 1;
     }
 
@@ -46,8 +46,8 @@ int main(int argc, char** argv)
     );
     if (ret < 0) {
         int sendto_err = errno;
-        printf("sendto() error: %s\n", strerror(sendto_err));
-        return sendto_err;
+        fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+        return -1;
     } else {
         printf("sendto() sent: %i bytes\n", ret);
     }
@@ -64,40 +64,42 @@ int validate_address(int argc, char** argv)
         return 1;
     }
 
-    {
-        // ensure vaules passed are corrent.
-        // TODO: find another way to do this
-        struct sockaddr_in sa;
-        ret = inet_pton(AF_INET, argv[1], &(sa.sin_addr));
-        if (ret == 0) {
-            printf("address given was not a valid network address\n");
-            return -1;
-        } else if (ret < 0) {
-            int inet_pton_err = errno;
-            printf(
-                "address family is not supported, %s\n",
-                strerror(inet_pton_err)
-            );
-            return -1;
-        }
+    // ensure vaules passed are corrent.
+    // TODO: find another way to do this
+    struct sockaddr_in sa;
+    ret = inet_pton(AF_INET, argv[1], &(sa.sin_addr));
+    if (ret == 0) {
+        fprintf(stderr, "address given was not a valid network address\n");
+        return -1;
+    } else if (ret < 0) {
+        int inet_pton_err = errno;
+        fprintf(
+            stderr,
+            "address family is not supported, %s\n",
+            strerror(inet_pton_err)
+        );
+        return -1;
+    }
 
-        unsigned short int port;
-        if (sscanf(argv[2], "%hu", &port) != 1) {
-            printf("port given was not a valid integer\n");
-            return -1;
-        }
-        if (port < 5000) {
-            printf("port given to small, give a port greater than 5000\n");
-            return -1;
-        }
+    unsigned short int port;
+    if (sscanf(argv[2], "%hu", &port) != 1) {
+        fprintf(stderr, "port given was not a valid integer\n");
+        return -1;
+    }
+    if (port < 5000) {
+        fprintf(stderr, "port given to small, give a port greater than 5000\n");
+        return -1;
     }
     return 0;
 }
 
 void useage()
 {
-    printf("usage: uftp_client address port\n  address: the uftp servers "
-           "address\n  port:    the uftp servers port\n");
+    fprintf(
+        stderr,
+        "usage: uftp_client address port\n  address: the uftp servers "
+        "address\n  port:    the uftp servers port\n"
+    );
 }
 
 int bind_client_socket(int* sockfd_o)
