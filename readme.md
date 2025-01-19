@@ -1,9 +1,5 @@
 # Protocol
 ## Server
-### Errors
-'CER'
-    response to an invalid command
-
 ### Responses
 'FLS'|uint32_t number_filenames to be sent
     indicates how many FLN packets will be sent
@@ -16,7 +12,13 @@ FGS|uint32_t number lines to be sent
 
 FGN|uint32_t packet length|uint32_t seq|file line
     packet containing line of file
-
+### Errors
+**Invalid Command**
+Sent to client if command is not recognized.
+```mermaid
+packet-beta
+0-23: "'CER'"
+```
 ### Misc
 GDB: acknowledge clients exit
 
