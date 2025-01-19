@@ -1,47 +1,36 @@
 # Protocol
 ## Server
 ### Responses
-'FLS'|uint32_t number_filenames to be sent
+'FLS'|'uint32_t' number_filenames to be sent
     indicates how many FLN packets will be sent
 
-FLN|uint32_t packet length|uint32_t seq|filename
+FLN|'uint32_t' packet_length|'uint32_t' seq|filename_str
     filename sent for 'ls' command
 
-FGS|uint32_t number lines to be sent
+FGS|'uint32_t' number_lines
     indicates how many FGN packets will be sent
 
-FGN|uint32_t packet length|uint32_t seq|file line
+FGN|'uint32_t' packet_length|'uint32_t' seq|file line
     packet containing line of file
 
-**Goodbye**
-Sent to client on client exit command
-```mermaid
-packet-beta
-0-23: "'GDB'"
-```
+GDB
+    Sent to client on client exit command
+
 ### Errors
-**Invalid Command**
-Sent to client if command is not recognized.
-```mermaid
-packet-beta
-0-23: "'CER'"
-```
+CER
+    Sent to client if command is not recognized.
 
 ## Client
 ### Command packets
-**Exit**
-Notify the server that the client is done
-```mermaid
-packet-beta
-0-23: "'EXT'"
-```
+EXT
+    Notify the server that the client is done
 
-GFL|uint32_t packet_length|filename
+GFL|'uint32_t' packet_length|filename_str
     get specific file
 
 LST: get a list of files on server
 
-FPS|uint32_t packet_length|uint32_t file line count|filename
+FPS|'uint32_t' packet_length|'uint32_t' line_count|filename_str
     put a file on the server
 
-FPN|uint32_t packet_length|uint32_t seq|file line
+FPN|'uint32_t' packet_length|'uint32_t' seq|line_str
