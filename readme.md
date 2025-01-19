@@ -1,11 +1,11 @@
 # Protocol
 ## Server
 ### Errors
-LER: command length error, invalid command length
-CER: command error, invalid command
+'CER'
+    response to an invalid command
 
-### Command packets
-FLS|uint32_t number filenames to be sent
+### Responses
+'FLS'|uint32_t number_filenames to be sent
     indicates how many FLN packets will be sent
 
 FLN|uint32_t packet length|uint32_t seq|filename

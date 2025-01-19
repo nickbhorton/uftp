@@ -19,8 +19,6 @@
 void useage();
 int validate_port(int argc, char** argv);
 
-void clear_terminal();
-
 void* get_in_addr(struct sockaddr* sa);
 
 int get_udp_server_socket(const char* addr, const char* port);
@@ -65,7 +63,7 @@ int main(int argc, char** argv)
     return 0;
 }
 
-int sent_rawcmd_packet(
+int send_rawcmd_packet(
     int sockfd,
     const struct sockaddr_storage* client_addr,
     socklen_t client_addr_len,
@@ -196,26 +194,18 @@ int send_file(
         (char*)msg + 3 + sizeof(uint32_t),
         recv_packet_length - (3 + sizeof(uint32_t))
     );
-    bool found = false;
+    bool found_file = false;
     for (size_t i = 0; i < filenames->len; i++) {
         if (mstring_cmp(&filenames->data[i], &get_filename) == 0) {
-            found = true;
+            found_file = true;
         }
     }
-    if (!found) {
-        const char* outmsg = "FNO";
-        if (sendto(
-                sockfd,
-                outmsg,
-                strlen(outmsg),
-                0,
-                (const struct sockaddr*)client_addr,
-                client_addr_len
-            ) < 0) {
-            int sendto_err = errno;
-            fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+    if (!found_file) {
+        int ret =
+            send_rawcmd_packet(sockfd, client_addr, client_addr_len, "FNO");
+        if (ret < 0) {
             mstring_free(&get_filename);
-            return -1;
+            return ret;
         }
     } else {
         mstring_insert(&get_filename, "smnt/files/", 0);
@@ -269,7 +259,7 @@ int handle_input(
     int ret;
     // exit
     if (strncmp("EXT", msg, 3) == 0) {
-        ret = sent_rawcmd_packet(sockfd, client_addr, client_addr_len, "GDB");
+        ret = send_rawcmd_packet(sockfd, client_addr, client_addr_len, "GDB");
         if (ret < 0) {
             return ret;
         }
@@ -317,7 +307,7 @@ int handle_input(
     }
     // unknown command, send error
     else {
-        ret = sent_rawcmd_packet(sockfd, client_addr, client_addr_len, "CER");
+        ret = send_rawcmd_packet(sockfd, client_addr, client_addr_len, "CER");
         if (ret < 0) {
             return ret;
         }
@@ -513,13 +503,6 @@ void useage()
         "usage: uftp_server port\n  port: the port you want the server to "
         "listen on\n"
     );
-}
-
-void clear_terminal()
-{
-    printf("\033[2J");   // clear terminal
-    printf("\033[1;1H"); // cursor to top left
-    fflush(stdout);      // flush these bytes before we do anthing
 }
 
 // directly from beej.us with no changes
