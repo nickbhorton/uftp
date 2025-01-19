@@ -22,6 +22,8 @@ void mstring_insert(mstring_t* s, const char* str, size_t loc);
 // if -1 strings are not of equal length
 // if positive, index of first non equal
 int mstring_cmp(mstring_t* s1, mstring_t* s2);
+int mstring_cmp_cstr(mstring_t* s1, const char* cstring);
 void mstring_dbprint(mstring_t* s);
+void mstring_print(mstring_t* s);
 
 #endif

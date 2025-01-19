@@ -1,3 +1,4 @@
+#include "uftp_server.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -15,14 +16,13 @@
 
 #include "fileio.h"
 #include "mstring.h"
+#include "uftp.h"
 
 void useage();
 int validate_port(int argc, char** argv);
 
-void* get_in_addr(struct sockaddr* sa);
-
-int get_udp_server_socket(const char* addr, const char* port);
 int server_loop(int sockfd, mstring_vec_t* filenames);
+
 void print_input(
     int bytes_recv,
     struct sockaddr_storage* client_addr,
@@ -30,9 +30,8 @@ void print_input(
 );
 int handle_input(
     int sockfd,
+    client_info_t* client,
     int bytes_recv,
-    const struct sockaddr_storage* client_addr,
-    socklen_t client_addr_len,
     const char* msg,
     const mstring_vec_t* filenames
 );
@@ -51,7 +50,7 @@ int main(int argc, char** argv)
     mstring_free(&ifname);
 
     int sockfd;
-    if ((sockfd = get_udp_server_socket(NULL, argv[1])) < 0) {
+    if ((sockfd = get_udp_socket(NULL, argv[1])) < 0) {
         mstring_vec_free(&filenames);
         return 1;
     }
@@ -63,12 +62,7 @@ int main(int argc, char** argv)
     return 0;
 }
 
-int send_rawcmd_packet(
-    int sockfd,
-    const struct sockaddr_storage* client_addr,
-    socklen_t client_addr_len,
-    const char* outcmd
-)
+int send_rawcmd_packet(int sockfd, client_info_t* client, const char* outcmd)
 {
     int bytes_sent;
     if ((bytes_sent = sendto(
@@ -76,8 +70,8 @@ int send_rawcmd_packet(
              outcmd,
              strlen(outcmd),
              0,
-             (const struct sockaddr*)client_addr,
-             client_addr_len
+             (const struct sockaddr*)&client->addr,
+             client->addr_len
          )) < 0) {
         int sendto_err = errno;
         fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
@@ -88,8 +82,7 @@ int send_rawcmd_packet(
 
 int send_s_packet(
     int sockfd,
-    const struct sockaddr_storage* client_addr,
-    socklen_t client_addr_len,
+    client_info_t* client,
     uint32_t count,
     const char* outcmd
 )
@@ -109,8 +102,8 @@ int send_s_packet(
              packet.data,
              packet.len,
              0,
-             (const struct sockaddr*)client_addr,
-             client_addr_len
+             (const struct sockaddr*)&client->addr,
+             client->addr_len
          )) < 0) {
         int sendto_err = errno;
         fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
@@ -124,8 +117,7 @@ int send_s_packet(
 
 int send_n_packet(
     int sockfd,
-    const struct sockaddr_storage* client_addr,
-    socklen_t client_addr_len,
+    client_info_t* client,
     const mstring_t* line,
     uint32_t seq,
     const char* outcmd
@@ -152,8 +144,8 @@ int send_n_packet(
              packet.data,
              packet.len,
              0,
-             (const struct sockaddr*)client_addr,
-             client_addr_len
+             (const struct sockaddr*)&client->addr,
+             client->addr_len
          )) < 0) {
         int sendto_err = errno;
         fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
@@ -167,9 +159,8 @@ int send_n_packet(
 
 int send_file(
     int sockfd,
+    client_info_t* client,
     int bytes_recv,
-    const struct sockaddr_storage* client_addr,
-    socklen_t client_addr_len,
     const char* msg,
     const mstring_vec_t* filenames
 )
@@ -201,8 +192,7 @@ int send_file(
         }
     }
     if (!found_file) {
-        int ret =
-            send_rawcmd_packet(sockfd, client_addr, client_addr_len, "FNO");
+        int ret = send_rawcmd_packet(sockfd, client, "FNO");
         if (ret < 0) {
             mstring_free(&get_filename);
             return ret;
@@ -214,13 +204,7 @@ int send_file(
         read_file_lines(&file_lines, &get_filename);
 
         int ret;
-        ret = send_s_packet(
-            sockfd,
-            client_addr,
-            client_addr_len,
-            file_lines.len,
-            "FGS"
-        );
+        ret = send_s_packet(sockfd, client, file_lines.len, "FGS");
         if (ret < 0) {
             mstring_vec_free(&file_lines);
             mstring_free(&get_filename);
@@ -229,8 +213,7 @@ int send_file(
         for (size_t i = 0; i < file_lines.len; i++) {
             ret = send_n_packet(
                 sockfd,
-                client_addr,
-                client_addr_len,
+                client,
                 &file_lines.data[i],
                 i + 1,
                 "GFN"
@@ -249,9 +232,8 @@ int send_file(
 
 int handle_input(
     int sockfd,
+    client_info_t* client,
     int bytes_recv,
-    const struct sockaddr_storage* client_addr,
-    socklen_t client_addr_len,
     const char* msg,
     const mstring_vec_t* filenames
 )
@@ -259,28 +241,21 @@ int handle_input(
     int ret;
     // exit
     if (strncmp("EXT", msg, 3) == 0) {
-        ret = send_rawcmd_packet(sockfd, client_addr, client_addr_len, "GDB");
+        ret = send_rawcmd_packet(sockfd, client, "GDB");
         if (ret < 0) {
             return ret;
         }
     }
     // ls
     else if (strncmp("LST", msg, 3) == 0) {
-        ret = send_s_packet(
-            sockfd,
-            client_addr,
-            client_addr_len,
-            filenames->len,
-            "FLS"
-        );
+        ret = send_s_packet(sockfd, client, filenames->len, "FLS");
         if (ret < 0) {
             return ret;
         }
         for (size_t i = 0; i < filenames->len; i++) {
             ret = send_n_packet(
                 sockfd,
-                client_addr,
-                client_addr_len,
+                client,
                 &filenames->data[i],
                 i + 1,
                 "FLN"
@@ -293,21 +268,14 @@ int handle_input(
     }
     // get 'filename'
     else if (strncmp("GFL", msg, 3) == 0) {
-        ret = send_file(
-            sockfd,
-            bytes_recv,
-            client_addr,
-            client_addr_len,
-            msg,
-            filenames
-        );
+        ret = send_file(sockfd, client, bytes_recv, msg, filenames);
         if (ret < 0) {
             return ret;
         }
     }
     // unknown command, send error
     else {
-        ret = send_rawcmd_packet(sockfd, client_addr, client_addr_len, "CER");
+        ret = send_rawcmd_packet(sockfd, client, "CER");
         if (ret < 0) {
             return ret;
         }
@@ -320,6 +288,9 @@ int server_loop(int sockfd, mstring_vec_t* filenames)
     struct pollfd pfds[1];
     pfds[0].fd = sockfd;
     pfds[0].events = POLLIN;
+
+    client_list_t cl;
+    client_list_init(&cl);
 
     char msg_buffer[128];
     memset(msg_buffer, 0, sizeof(msg_buffer));
@@ -344,15 +315,17 @@ int server_loop(int sockfd, mstring_vec_t* filenames)
                 );
 
                 if (bytes_recv >= 0) {
+                    client_info_t* current_client =
+                        get_client(&cl, &client_addr, client_addr_len);
                     print_input(bytes_recv, &client_addr, msg_buffer);
                     if (handle_input(
                             sockfd,
+                            current_client,
                             bytes_recv,
-                            &client_addr,
-                            client_addr_len,
                             msg_buffer,
                             filenames
                         ) < 0) {
+                        client_list_free(&cl);
                         return -1;
                     }
                     memset(msg_buffer, 0, bytes_recv);
@@ -363,6 +336,7 @@ int server_loop(int sockfd, mstring_vec_t* filenames)
                         "recvfrom() error: %s\n",
                         strerror(recvfrom_err)
                     );
+                    client_list_free(&cl);
                     return -1;
                 }
             } else {
@@ -370,85 +344,7 @@ int server_loop(int sockfd, mstring_vec_t* filenames)
             }
         }
     }
-}
-
-int get_udp_server_socket(const char* addr, const char* port)
-{
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET; // ipv4
-    hints.ai_socktype = SOCK_DGRAM;
-    if (addr == NULL) {
-        hints.ai_flags = AI_PASSIVE;
-    }
-
-    struct addrinfo* server_info;
-    int ret;
-    ret = getaddrinfo(addr, port, &hints, &server_info);
-    if (ret != 0) {
-        fprintf(stderr, "getaddrinfo() error: %s\n", gai_strerror(ret));
-        return -1;
-    }
-
-    // linked list traversal vibe from beej.us
-    int sfd;
-    struct addrinfo* ptr;
-    for (ptr = server_info; ptr != NULL; ptr = ptr->ai_next) {
-        if ((sfd = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol)) <
-            0) {
-            int sock_err = errno;
-            fprintf(stderr, "socket() error: %s\n", strerror(sock_err));
-            continue; // next loop
-        }
-        if ((bind(sfd, ptr->ai_addr, ptr->ai_addrlen)) < 0) {
-            int sock_err = errno;
-            close(sfd);
-            char failed_addr[INET6_ADDRSTRLEN];
-            memset(&failed_addr, 0, sizeof(failed_addr));
-            inet_ntop(
-                ptr->ai_family,
-                get_in_addr(ptr->ai_addr),
-                failed_addr,
-                sizeof(failed_addr)
-            );
-            fprintf(
-                stderr,
-                "failed to bind() to %s: %s\n",
-                strerror(sock_err),
-                failed_addr
-            );
-            continue; // next loop
-        }
-        break; // if here we have a valid bound SOCK_DGRAM socket
-    }
-
-    if (ptr == NULL) {
-        fprintf(stderr, "failed to find and bind a socket");
-        return -1;
-    }
-
-    char success_addr[INET6_ADDRSTRLEN];
-    memset(&success_addr, 0, sizeof(success_addr));
-    inet_ntop(
-        ptr->ai_family,
-        get_in_addr(ptr->ai_addr),
-        success_addr,
-        sizeof(success_addr)
-    );
-    fprintf(stdout, "server bound to address %s\n", success_addr);
-
-    freeaddrinfo(server_info);
-
-    // setting sockopts
-    int yes = 1;
-    if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
-        int sock_err = errno;
-        fprintf(stderr, "socket() error: %s\n", strerror(sock_err));
-        close(sfd);
-        return -1;
-    }
-
-    return sfd;
+    client_list_free(&cl);
 }
 
 void print_input(
@@ -503,14 +399,4 @@ void useage()
         "usage: uftp_server port\n  port: the port you want the server to "
         "listen on\n"
     );
-}
-
-// directly from beej.us with no changes
-void* get_in_addr(struct sockaddr* sa)
-{
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    }
-
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }

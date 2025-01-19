@@ -37,7 +37,20 @@ int mstring_cmp(mstring_t* s1, mstring_t* s2)
     }
     for (size_t i = 0; i < s1->len; i++) {
         if (s1->data[i] != s2->data[i]) {
-            return i;
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+int mstring_cmp_cstr(mstring_t* s1, const char* cstring)
+{
+    if (s1->len != strlen(cstring)) {
+        return -1;
+    }
+    for (size_t i = 0; i < s1->len; i++) {
+        if (s1->data[i] != cstring[i]) {
+            return i + 1;
         }
     }
     return 0;
@@ -77,4 +90,10 @@ void mstring_dbprint(mstring_t* s)
         printf("%c", s->data[i]);
     }
     printf("\n");
+}
+void mstring_print(mstring_t* s)
+{
+    for (size_t i = 0; i < s->len; i++) {
+        printf("%c", s->data[i]);
+    }
 }
