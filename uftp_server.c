@@ -1,4 +1,6 @@
+#include <assert.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +13,9 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "fileio.h"
+#include "mstring.h"
+
 void useage();
 int validate_port(int argc, char** argv);
 
@@ -19,7 +24,7 @@ void clear_terminal();
 void* get_in_addr(struct sockaddr* sa);
 
 int get_udp_server_socket(const char* addr, const char* port);
-int server_loop(int sockfd);
+int server_loop(int sockfd, mstring_vec_t* filenames);
 void print_input(
     int bytes_recv,
     struct sockaddr_storage* client_addr,
@@ -30,27 +35,171 @@ int handle_input(
     int bytes_recv,
     const struct sockaddr_storage* client_addr,
     socklen_t client_addr_len,
-    char* msg
+    const char* msg,
+    const mstring_vec_t* filenames
 );
-
-char filenames[5][64] = {
-    "my_homework1.txt",
-    "cat.png",
-    "cool_terminal_app.c",
-    "stanford_dragon.obj",
-    "nvim.zip"
-};
 
 int main(int argc, char** argv)
 {
+    mstring_vec_t filenames;
+    mstring_t ifname;
+    mstring_init(&ifname);
+    mstring_append(&ifname, "smnt/filenames.txt");
+    read_file_lines(&filenames, &ifname);
+    mstring_free(&ifname);
+
+    validate_port(argc, argv);
+
     int sockfd;
     if ((sockfd = get_udp_server_socket(NULL, argv[1])) < 0) {
+        mstring_vec_free(&filenames);
         return 1;
     }
 
-    if (server_loop(sockfd) < 0) {
+    if (server_loop(sockfd, &filenames) < 0) {
         close(sockfd);
     }
+    mstring_vec_free(&filenames);
+    return 0;
+}
+
+int send_fls_packet(
+    int sockfd,
+    const struct sockaddr_storage* client_addr,
+    socklen_t client_addr_len,
+    uint32_t filename_count
+)
+{
+    const char* outcmd = "FLS";
+    mstring_t packet;
+    mstring_init(&packet);
+    uint32_t packet_filename_count_net = htonl(filename_count);
+    mstring_append(&packet, outcmd);
+    mstring_appendn(
+        &packet,
+        (char*)&packet_filename_count_net,
+        sizeof(packet_filename_count_net)
+    );
+    int bytes_sent;
+    if ((bytes_sent = sendto(
+             sockfd,
+             packet.data,
+             packet.len,
+             0,
+             (const struct sockaddr*)client_addr,
+             client_addr_len
+         )) < 0) {
+        int sendto_err = errno;
+        fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+        mstring_free(&packet);
+        return -1;
+    }
+    assert(bytes_sent == packet.len);
+    mstring_free(&packet);
+    return 0;
+}
+
+int send_fln_packet(
+    int sockfd,
+    const struct sockaddr_storage* client_addr,
+    socklen_t client_addr_len,
+    const mstring_t* filename,
+    uint32_t seq
+)
+{
+    const char* outcmd = "FLN";
+    mstring_t packet;
+    mstring_init(&packet);
+
+    // 2 uint32_t for length and seq
+    uint32_t packet_length_net =
+        htonl(filename->len + strlen(outcmd) + sizeof(uint32_t) * 2);
+    uint32_t packet_seq_net = htonl(seq);
+    mstring_append(&packet, outcmd);
+    mstring_appendn(
+        &packet,
+        (char*)&packet_length_net,
+        sizeof(packet_length_net)
+    );
+    mstring_appendn(&packet, (char*)&packet_seq_net, sizeof(packet_length_net));
+    mstring_appendn(&packet, filename->data, filename->len);
+    int bytes_sent;
+    if ((bytes_sent = sendto(
+             sockfd,
+             packet.data,
+             packet.len,
+             0,
+             (const struct sockaddr*)client_addr,
+             client_addr_len
+         )) < 0) {
+        int sendto_err = errno;
+        fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+        mstring_free(&packet);
+        return -1;
+    }
+    assert(bytes_sent == packet.len);
+    mstring_free(&packet);
+    return 0;
+}
+
+int send_file(
+    int sockfd,
+    int bytes_recv,
+    const struct sockaddr_storage* client_addr,
+    socklen_t client_addr_len,
+    const char* msg,
+    const mstring_vec_t* filenames
+)
+{
+    if (bytes_recv < 3 + sizeof(uint32_t)) {
+        fprintf(
+            stderr,
+            "get 'filename' command packet two small to contain a filename "
+            "length\n"
+        );
+        return -1;
+    }
+    uint32_t recv_packet_length = ntohl(*((uint32_t*)(msg + 3)));
+    if (bytes_recv < recv_packet_length) {
+        fprintf(stderr, "GFL packet was too short\n");
+        return -1;
+    }
+    mstring_t filename;
+    mstring_init(&filename);
+    mstring_appendn(
+        &filename,
+        (char*)msg + 3 + sizeof(uint32_t),
+        recv_packet_length - (3 + sizeof(uint32_t))
+    );
+    bool found = false;
+    for (size_t i = 0; i < filenames->len; i++) {
+        if (mstring_cmp(&filenames->data[i], &filename) == 0) {
+            found = true;
+        }
+    }
+    if (!found) {
+        const char* outmsg = "FNO";
+        if (sendto(
+                sockfd,
+                outmsg,
+                strlen(outmsg),
+                0,
+                (const struct sockaddr*)client_addr,
+                client_addr_len
+            ) < 0) {
+            int sendto_err = errno;
+            fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+            mstring_free(&filename);
+            return -1;
+        }
+    } else {
+        mstring_insert(&filename, "smnt/files/", 0);
+        mstring_vec_t file;
+        mstring_vec_init(&file);
+        read_file_lines(&file, &filename);
+        mstring_vec_free(&file);
+    }
+    mstring_free(&filename);
     return 0;
 }
 
@@ -59,76 +208,69 @@ int handle_input(
     int bytes_recv,
     const struct sockaddr_storage* client_addr,
     socklen_t client_addr_len,
-    char* msg
+    const char* msg,
+    const mstring_vec_t* filenames
 )
 {
-    if (bytes_recv == 3) {
-        // exit
-        if (strncmp("EXT", msg, 3) == 0) {
-            const char* outmsg = "GDB";
-            if (sendto(
-                    sockfd,
-                    outmsg,
-                    strlen(outmsg),
-                    0,
-                    (const struct sockaddr*)client_addr,
-                    client_addr_len
-                ) < 0) {
-                int sendto_err = errno;
-                fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
-                return -1;
-            }
-
+    // exit
+    if (strncmp("EXT", msg, 3) == 0) {
+        const char* outmsg = "GDB";
+        if (sendto(
+                sockfd,
+                outmsg,
+                strlen(outmsg),
+                0,
+                (const struct sockaddr*)client_addr,
+                client_addr_len
+            ) < 0) {
+            int sendto_err = errno;
+            fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+            return -1;
         }
-        // ls
-        else if (strncmp("LST", msg, 3) == 0) {
-            const char* outcmd = "FLN";
-            printf("%lu\n", sizeof(filenames[0]));
 
-            for (size_t i = 0; i < sizeof(filenames) / sizeof(filenames[0]);
-                 i++) {
-                size_t filename_len =
-                    strnlen(filenames[i], sizeof(filenames[0]));
-                size_t tosend_size = strlen(outcmd) + filename_len;
-                char* tosend = malloc(tosend_size);
-                strncpy(tosend, outcmd, 3);
-                strncpy(tosend + 3, filenames[i], filename_len);
-                if (sendto(
-                        sockfd,
-                        tosend,
-                        tosend_size,
-                        0,
-                        (const struct sockaddr*)client_addr,
-                        client_addr_len
-                    ) < 0) {
-                    int sendto_err = errno;
-                    fprintf(
-                        stderr,
-                        "sendto() error: %s\n",
-                        strerror(sendto_err)
-                    );
-                    free(tosend);
-                    return -1;
-                }
-                free(tosend);
+    }
+    // ls
+    else if (strncmp("LST", msg, 3) == 0) {
+        int ret;
+        ret = send_fls_packet(
+            sockfd,
+            client_addr,
+            client_addr_len,
+            filenames->len
+        );
+        if (ret < 0) {
+            return ret;
+        }
+        for (size_t i = 0; i < filenames->len; i++) {
+            ret = send_fln_packet(
+                sockfd,
+                client_addr,
+                client_addr_len,
+                &filenames->data[i],
+                i + 1
+            );
+            if (ret < 0) {
+                return ret;
             }
-        } else {
-            const char* outmsg = "CER";
-            if (sendto(
-                    sockfd,
-                    outmsg,
-                    strlen(outmsg),
-                    0,
-                    (const struct sockaddr*)client_addr,
-                    client_addr_len
-                ) < 0) {
-                int sendto_err = errno;
-                fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
-                return -1;
-            }
+        }
+
+    }
+    // get 'filename'
+    else if (strncmp("GFL", msg, 3) == 0) {
+        int ret;
+        ret = send_file(
+            sockfd,
+            bytes_recv,
+            client_addr,
+            client_addr_len,
+            msg,
+            filenames
+        );
+        if (ret < 0) {
+            return ret;
         }
     } else {
-        const char* outmsg = "LER";
+        const char* outmsg = "CER";
         if (sendto(
                 sockfd,
                 outmsg,
@@ -145,7 +287,7 @@ int handle_input(
     return 0;
 }
 
-int server_loop(int sockfd)
+int server_loop(int sockfd, mstring_vec_t* filenames)
 {
     struct pollfd pfds[1];
     pfds[0].fd = sockfd;
@@ -180,7 +322,8 @@ int server_loop(int sockfd)
                             bytes_recv,
                             &client_addr,
                             client_addr_len,
-                            msg_buffer
+                            msg_buffer,
+                            filenames
                         ) < 0) {
                         return -1;
                     }

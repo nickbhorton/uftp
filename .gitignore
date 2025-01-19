@@ -1,3 +1,9 @@
 uftp_server
 uftp_client
+
+mstring_test
+mstring_vec_test
+fileio_test
+
 .clang*
+*.o
