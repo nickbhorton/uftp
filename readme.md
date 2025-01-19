@@ -12,6 +12,13 @@ FGS|uint32_t number lines to be sent
 
 FGN|uint32_t packet length|uint32_t seq|file line
     packet containing line of file
+
+**Goodbye**
+Sent to client on client exit command
+```mermaid
+packet-beta
+0-23: "'GDB'"
+```
 ### Errors
 **Invalid Command**
 Sent to client if command is not recognized.
@@ -19,12 +26,15 @@ Sent to client if command is not recognized.
 packet-beta
 0-23: "'CER'"
 ```
-### Misc
-GDB: acknowledge clients exit
 
 ## Client
 ### Command packets
-EXT: notify the server that the client is done
+**Exit**
+Notify the server that the client is done
+```mermaid
+packet-beta
+0-23: "'EXT'"
+```
 
 GFL|uint32_t packet_length|filename
     get specific file
