@@ -41,14 +41,16 @@ int handle_input(
 
 int main(int argc, char** argv)
 {
+    if (validate_port(argc, argv) < 0) {
+        return 1;
+    }
+
     mstring_vec_t filenames;
     mstring_t ifname;
     mstring_init(&ifname);
     mstring_append(&ifname, "smnt/filenames.txt");
     read_file_lines(&filenames, &ifname);
     mstring_free(&ifname);
-
-    validate_port(argc, argv);
 
     int sockfd;
     if ((sockfd = get_udp_server_socket(NULL, argv[1])) < 0) {
@@ -63,17 +65,40 @@ int main(int argc, char** argv)
     return 0;
 }
 
-int send_fls_packet(
+int sent_rawcmd_packet(
     int sockfd,
     const struct sockaddr_storage* client_addr,
     socklen_t client_addr_len,
-    uint32_t filename_count
+    const char* outcmd
 )
 {
-    const char* outcmd = "FLS";
+    int bytes_sent;
+    if ((bytes_sent = sendto(
+             sockfd,
+             outcmd,
+             strlen(outcmd),
+             0,
+             (const struct sockaddr*)client_addr,
+             client_addr_len
+         )) < 0) {
+        int sendto_err = errno;
+        fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+        return -1;
+    }
+    return 0;
+}
+
+int send_s_packet(
+    int sockfd,
+    const struct sockaddr_storage* client_addr,
+    socklen_t client_addr_len,
+    uint32_t count,
+    const char* outcmd
+)
+{
     mstring_t packet;
     mstring_init(&packet);
-    uint32_t packet_filename_count_net = htonl(filename_count);
+    uint32_t packet_filename_count_net = htonl(count);
     mstring_append(&packet, outcmd);
     mstring_appendn(
         &packet,
@@ -99,21 +124,21 @@ int send_fls_packet(
     return 0;
 }
 
-int send_fln_packet(
+int send_n_packet(
     int sockfd,
     const struct sockaddr_storage* client_addr,
     socklen_t client_addr_len,
-    const mstring_t* filename,
-    uint32_t seq
+    const mstring_t* line,
+    uint32_t seq,
+    const char* outcmd
 )
 {
-    const char* outcmd = "FLN";
     mstring_t packet;
     mstring_init(&packet);
 
     // 2 uint32_t for length and seq
     uint32_t packet_length_net =
-        htonl(filename->len + strlen(outcmd) + sizeof(uint32_t) * 2);
+        htonl(line->len + strlen(outcmd) + sizeof(uint32_t) * 2);
     uint32_t packet_seq_net = htonl(seq);
     mstring_append(&packet, outcmd);
     mstring_appendn(
@@ -122,7 +147,7 @@ int send_fln_packet(
         sizeof(packet_length_net)
     );
     mstring_appendn(&packet, (char*)&packet_seq_net, sizeof(packet_length_net));
-    mstring_appendn(&packet, filename->data, filename->len);
+    mstring_appendn(&packet, line->data, line->len);
     int bytes_sent;
     if ((bytes_sent = sendto(
              sockfd,
@@ -164,16 +189,16 @@ int send_file(
         fprintf(stderr, "GFL packet was too short\n");
         return -1;
     }
-    mstring_t filename;
-    mstring_init(&filename);
+    mstring_t get_filename;
+    mstring_init(&get_filename);
     mstring_appendn(
-        &filename,
+        &get_filename,
         (char*)msg + 3 + sizeof(uint32_t),
         recv_packet_length - (3 + sizeof(uint32_t))
     );
     bool found = false;
     for (size_t i = 0; i < filenames->len; i++) {
-        if (mstring_cmp(&filenames->data[i], &filename) == 0) {
+        if (mstring_cmp(&filenames->data[i], &get_filename) == 0) {
             found = true;
         }
     }
@@ -189,17 +214,46 @@ int send_file(
             ) < 0) {
             int sendto_err = errno;
             fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
-            mstring_free(&filename);
+            mstring_free(&get_filename);
             return -1;
         }
     } else {
-        mstring_insert(&filename, "smnt/files/", 0);
-        mstring_vec_t file;
-        mstring_vec_init(&file);
-        read_file_lines(&file, &filename);
-        mstring_vec_free(&file);
+        mstring_insert(&get_filename, "smnt/files/", 0);
+        mstring_vec_t file_lines;
+        mstring_vec_init(&file_lines);
+        read_file_lines(&file_lines, &get_filename);
+
+        int ret;
+        ret = send_s_packet(
+            sockfd,
+            client_addr,
+            client_addr_len,
+            file_lines.len,
+            "FGS"
+        );
+        if (ret < 0) {
+            mstring_vec_free(&file_lines);
+            mstring_free(&get_filename);
+            return ret;
+        }
+        for (size_t i = 0; i < file_lines.len; i++) {
+            ret = send_n_packet(
+                sockfd,
+                client_addr,
+                client_addr_len,
+                &file_lines.data[i],
+                i + 1,
+                "GFN"
+            );
+            if (ret < 0) {
+                mstring_vec_free(&file_lines);
+                mstring_free(&get_filename);
+                return ret;
+            }
+        }
+        mstring_vec_free(&file_lines);
     }
-    mstring_free(&filename);
+    mstring_free(&get_filename);
     return 0;
 }
 
@@ -212,42 +266,34 @@ int handle_input(
     const mstring_vec_t* filenames
 )
 {
+    int ret;
     // exit
     if (strncmp("EXT", msg, 3) == 0) {
-        const char* outmsg = "GDB";
-        if (sendto(
-                sockfd,
-                outmsg,
-                strlen(outmsg),
-                0,
-                (const struct sockaddr*)client_addr,
-                client_addr_len
-            ) < 0) {
-            int sendto_err = errno;
-            fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
-            return -1;
+        ret = sent_rawcmd_packet(sockfd, client_addr, client_addr_len, "GDB");
+        if (ret < 0) {
+            return ret;
         }
-
     }
     // ls
     else if (strncmp("LST", msg, 3) == 0) {
-        int ret;
-        ret = send_fls_packet(
+        ret = send_s_packet(
             sockfd,
             client_addr,
             client_addr_len,
-            filenames->len
+            filenames->len,
+            "FLS"
         );
         if (ret < 0) {
             return ret;
         }
         for (size_t i = 0; i < filenames->len; i++) {
-            ret = send_fln_packet(
+            ret = send_n_packet(
                 sockfd,
                 client_addr,
                 client_addr_len,
                 &filenames->data[i],
-                i + 1
+                i + 1,
+                "FLN"
             );
             if (ret < 0) {
                 return ret;
@@ -257,7 +303,6 @@ int handle_input(
     }
     // get 'filename'
     else if (strncmp("GFL", msg, 3) == 0) {
-        int ret;
         ret = send_file(
             sockfd,
             bytes_recv,
@@ -269,19 +314,12 @@ int handle_input(
         if (ret < 0) {
             return ret;
         }
-    } else {
-        const char* outmsg = "CER";
-        if (sendto(
-                sockfd,
-                outmsg,
-                strlen(outmsg),
-                0,
-                (const struct sockaddr*)client_addr,
-                client_addr_len
-            ) < 0) {
-            int sendto_err = errno;
-            fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
-            return -1;
+    }
+    // unknown command, send error
+    else {
+        ret = sent_rawcmd_packet(sockfd, client_addr, client_addr_len, "CER");
+        if (ret < 0) {
+            return ret;
         }
     }
     return 0;
