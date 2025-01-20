@@ -1,26 +1,38 @@
 CC=gcc
-CFLAGS=-g3 -Wall -Wpedantic
+CFLAGS=-g3 -Wall -Werror -std=c99 -fsanitize=address
 
-all: fileio_test mstring_test mstring_vec_test uftp_client uftp_server
+all: test uftp_server
 
-fileio_test: fileio_test.c fileio.o mstring.o mstring_vec.o
+test: String_test StringVector_test
+	@echo -e "\x1b[33mString test:\x1b[0m"
+	@./String_test
+	@echo -e "\x1b[33mStringVector test:\x1b[0m"
+	@./StringVector_test
 
-mstring_test: mstring_test.c mstring.o
+String.o: String.h
 
-mstring_vec_test: mstring_vec_test.c mstring.o mstring_vec.o
-
-uftp_client: uftp_client.c uftp.o mstring.o
-
-uftp_server: uftp_server.c uftp_server.h fileio.o mstring.o mstring_vec.o uftp_server_extras.o uftp.o
+StringVector.o : StringVector.h
 
 uftp.o: uftp.h
 
-mstring.o: mstring.h
+uftp_server.o: uftp_server.h
+
+String_test: String_test.c String.o
+
+StringVector_test: StringVector_test.c String.o StringVector.o
+
+uftp_client: uftp_client.c uftp.o mstring.o
+
+uftp_server: uftp_server.o String.o StringVector.o uftp_server_extras.o uftp.o
+
 
 uftp_server_extras.o: uftp_server.h
 
 clean:
-	rm uftp_server
+	rm -f uftp_server
 	rm uftp_client
-	rm mstring_test 
+	rm String_test 
+	rm StringVector_test
 	rm *.o
+
+.PHONY: clean test
