@@ -1,6 +1,7 @@
 #ifndef UFTP_STRING
 #define UFTP_STRING
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,8 +43,9 @@ int16_t String_parse_i16(String* s, size_t loc);
 // if positive, index of first non equal
 int String_cmp(String* s1, String* s2);
 int String_cmp_cstr(String* s1, const char* cstring);
+int String_cmpn_cstr(String* s1, const char* cstring, size_t n);
 
-void String_print(String* s);
+void String_print(String* s, bool with_newline);
 void String_dbprint(String* s);
 void String_dbprint_hex(String* s);
 

@@ -75,7 +75,7 @@ StringVector StringVector_from_split(String* s, char split_on)
     StringVector sv = StringVector_new();
     for (size_t i = 0; i < s->len; i++) {
         String to_append = String_new();
-        while ((in = String_get(s, i)) != split_on && i < s->len) {
+        while (i < s->len && (in = String_get(s, i)) != split_on) {
             String_push_back(&to_append, in);
             i++;
         }

@@ -1,6 +1,4 @@
 #include "String.h"
-#include <stdint.h>
-#include <stdio.h>
 
 #define INIT_MALLOC 64
 
@@ -128,6 +126,22 @@ int String_cmp(String* s1, String* s2)
     }
     return 0;
 }
+int String_cmp_cstr(String* s1, const char* cstring)
+{
+    String s2 = String_from_cstr(cstring);
+    int ret = String_cmp(s1, &s2);
+    String_free(&s2);
+    return ret;
+}
+int String_cmpn_cstr(String* s1, const char* cstring, size_t n)
+{
+    String s3 = String_create(s1->data, n);
+    String s2 = String_create((char*)cstring, n);
+    int ret = String_cmp(&s3, &s2);
+    String_free(&s3);
+    String_free(&s2);
+    return ret;
+}
 
 void String_push_copy(String* to, String* from)
 {
@@ -178,12 +192,14 @@ void String_dbprint_hex(String* s)
     printf("\n");
 }
 
-void String_print(String* s)
+void String_print(String* s, bool with_newline)
 {
     for (size_t i = 0; i < s->len; i++) {
         printf("%c", String_get(s, i));
     }
-    printf("\n");
+    if (with_newline) {
+        printf("\n");
+    }
 }
 
 String String_from_file(String* filename)

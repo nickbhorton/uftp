@@ -1,6 +1,5 @@
-#include "mstring.h"
-#include "uftp.h"
 #include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,11 +10,126 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "String.h"
+#include "StringVector.h"
+#include "uftp.h"
+
+#define BUFFER_LENGTH 256
+
+#define DEBUG 0
+
 void useage();
 
 int validate_address(int argc, char** argv);
 
-int bind_client_socket(int* sockfd_o);
+int send_cmd(
+    int sockfd,
+    struct sockaddr* address,
+    socklen_t address_length,
+    String* cmd
+)
+{
+    int bytes_sent_or_error;
+    if ((bytes_sent_or_error =
+             sendto(sockfd, cmd->data, cmd->len, 0, address, address_length)) <
+        0) {
+        int sendto_err = errno;
+        fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+        return -1;
+    } else if (bytes_sent_or_error != cmd->len) {
+        fprintf(
+            stderr,
+            "send_packet() error: %s\n",
+            "bytes sent were less than packet length"
+        );
+        return -2;
+    }
+    return bytes_sent_or_error;
+}
+
+int handle_ls_response(
+    struct pollfd* server_pollfd,
+    struct sockaddr* server_addr,
+    socklen_t server_addr_len
+)
+{
+    char msg_buffer[BUFFER_LENGTH];
+    memset(msg_buffer, 0, sizeof(msg_buffer));
+
+    uint32_t number_filenames_to_recv = 0;
+    uint32_t number_filenames_recv = 0;
+
+    while (1) {
+        if (number_filenames_recv == number_filenames_to_recv &&
+            number_filenames_to_recv != 0) {
+            return 0;
+        }
+        int num_events = poll(server_pollfd, 1, 2500);
+        if (num_events != 0) {
+            if (server_pollfd[0].revents & POLLIN) {
+                int bytes_recv = recvfrom(
+                    server_pollfd[0].fd,
+                    msg_buffer,
+                    sizeof(msg_buffer),
+                    0,
+                    (struct sockaddr*)&server_addr,
+                    &server_addr_len
+                );
+                if (bytes_recv > 0) {
+                    String packet = String_create(msg_buffer, bytes_recv);
+                    String head = String_create(msg_buffer, 3);
+                    if (String_cmp_cstr(&head, "FLS") == 0 && packet.len == 7) {
+                        number_filenames_to_recv =
+                            ntohl(String_parse_u32(&packet, 3));
+                        if (DEBUG) {
+                            printf(
+                                "to recv %u filenames\n",
+                                number_filenames_to_recv
+                            );
+                        }
+                    } else if (String_cmp_cstr(&head, "FLN") == 0 &&
+                               packet.len >= 11) {
+                        uint32_t packet_length =
+                            ntohl(String_parse_u32(&packet, 3));
+                        if (packet.len != packet_length) {
+                            fprintf(
+                                stderr,
+                                "FLN packet was the wrong size, %u, %zu\n",
+                                packet_length,
+                                packet.len
+                            );
+                        }
+                        uint32_t packet_seq =
+                            ntohl(String_parse_u32(&packet, 7));
+                        String filename =
+                            String_create(packet.data + 11, packet.len - 11);
+                        String_print(&filename, false);
+                        if (DEBUG) {
+                            printf(" %u\n", packet_seq);
+                        } else {
+                            printf("\n");
+                        }
+                        String_free(&filename);
+                        number_filenames_recv++;
+                    } else {
+                        fprintf(
+                            stderr,
+                            "handle_ls_response, strange packet found\n"
+                        );
+                        String_print(&head, true);
+                        String_dbprint_hex(&packet);
+                    }
+                    String_free(&packet);
+                    String_free(&head);
+                }
+            }
+        } else {
+            fprintf(stderr, "timed out\n");
+            return 0;
+        }
+    }
+    return 0;
+}
 
 int main(int argc, char** argv)
 {
@@ -42,50 +156,83 @@ int main(int argc, char** argv)
     pfds[1].fd = sockfd;
     pfds[1].events = POLLIN;
 
-    char msg_buffer[128];
+    char msg_buffer[BUFFER_LENGTH];
     memset(msg_buffer, 0, sizeof(msg_buffer));
 
     struct sockaddr_storage server_addr;
     socklen_t server_addr_len;
     int bytes_recv;
+    bool timed_out = false;
     while (1) {
+        if (!timed_out) {
+            printf("> ");
+            fflush(stdout);
+        }
         memset(&server_addr, 0, sizeof(server_addr));
         server_addr_len = sizeof(server_addr);
 
         int num_events = poll(pfds, 2, 2500);
         if (num_events != 0) {
+            timed_out = false;
             if (pfds[0].revents & POLLIN) {
                 bytes_recv = read(0, msg_buffer, sizeof(msg_buffer));
-                if (bytes_recv > 0) {
-                    mstring_t cmd;
-                    mstring_init(&cmd);
-                    // -1 to remove the \n
-                    mstring_appendn(&cmd, msg_buffer, bytes_recv - 1);
-                    if (mstring_cmp_cstr(&cmd, "ls") == 0) {
-                        printf("requesting list from server\n");
-                        int bytes_sent;
-                        if ((bytes_sent = sendto(
-                                 sockfd,
-                                 "LST",
-                                 3,
-                                 0,
-                                 serv_res->ai_addr,
-                                 serv_res->ai_addrlen
-                             )) < 0) {
-                            int sendto_err = errno;
-                            fprintf(
-                                stderr,
-                                "sendto() error: %s\n",
-                                strerror(sendto_err)
-                            );
-                            return 1;
+                if (bytes_recv > 1) {
+                    // -1 to remove the \n for line buffered terminal?
+                    String cmd = String_create(msg_buffer, bytes_recv - 1);
+                    if (String_cmp_cstr(&cmd, "ls") == 0) {
+                        String ls_command = String_from_cstr("LST");
+                        int bs_or_err = send_cmd(
+                            sockfd,
+                            serv_res->ai_addr,
+                            serv_res->ai_addrlen,
+                            &ls_command
+                        );
+                        if (bs_or_err < 0) {
+                            String_free(&ls_command);
+                            return bs_or_err;
                         }
+                        String_free(&ls_command);
+                        bs_or_err = handle_ls_response(
+                            &pfds[1],
+                            serv_res->ai_addr,
+                            serv_res->ai_addrlen
+                        );
+                        if (bs_or_err < 0) {
+                            return bs_or_err;
+                        }
+                    } else if (String_cmp_cstr(&cmd, "exit") == 0) {
+                        String ls_command = String_from_cstr("EXT");
+                        int bs_or_err = send_cmd(
+                            sockfd,
+                            serv_res->ai_addr,
+                            serv_res->ai_addrlen,
+                            &ls_command
+                        );
+                        if (bs_or_err < 0) {
+                            String_free(&ls_command);
+                            return bs_or_err;
+                        }
+                        String_free(&ls_command);
+                    } else if (String_cmpn_cstr(&cmd, "get", 3) == 0) {
+                        StringVector sv = StringVector_from_split(&cmd, ' ');
+                        if (sv.len >= 2) {
+                            String filename = String_create(
+                                StringVector_get(&sv, 1)->data,
+                                StringVector_get(&sv, 1)->len
+                            );
+                            String_print(&filename, true);
+                            String_free(&filename);
+                        } else {
+                            printf("-uftp_client: ");
+                            printf(": usage is 'get <filename>'\n");
+                        }
+                        StringVector_free(&sv);
                     } else {
                         printf("-uftp_client: ");
-                        mstring_print(&cmd);
+                        String_print(&cmd, false);
                         printf(": command not found\n");
                     }
-                    mstring_free(&cmd);
+                    String_free(&cmd);
                 } else {
                     int read_err = errno;
                     fprintf(stderr, "read() error: %s\n", strerror(read_err));
@@ -102,14 +249,16 @@ int main(int argc, char** argv)
                     &server_addr_len
                 );
                 if (bytes_recv > 0) {
-                    mstring_t packet;
-                    mstring_init(&packet);
-                    mstring_appendn(&packet, msg_buffer, bytes_recv);
-                    mstring_print(&packet);
-                    printf("\n");
-                    mstring_free(&packet);
+                    String packet = String_create(msg_buffer, bytes_recv);
+                    String head = String_create(packet.data, 3);
+                    String_print(&head, true);
+                    String_dbprint_hex(&packet);
+                    String_free(&packet);
+                    String_free(&head);
                 }
             }
+        } else {
+            timed_out = true;
         }
         memset(msg_buffer, 0, sizeof(msg_buffer));
     }

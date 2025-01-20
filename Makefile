@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-g3 -Wall -Werror -fsanitize=address
 
-all: uftp_server
+all: uftp_server uftp_client
 
 String.o: String.h
 
@@ -15,7 +15,7 @@ String_test: String_test.c String.o
 
 StringVector_test: StringVector_test.c String.o StringVector.o
 
-uftp_client: uftp_client.c uftp.o mstring.o
+uftp_client: uftp_client.c uftp.o String.o StringVector.o
 
 uftp_server: uftp_server.o String.o StringVector.o uftp_server_extras.o uftp.o
 	$(CC) -o $@ $^ $(CFLAGS)
