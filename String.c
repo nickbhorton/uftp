@@ -5,7 +5,6 @@
 #define INIT_MALLOC 64
 
 // implementation secific
-//
 
 void String_appendn(String* s, char* str, size_t size)
 {
