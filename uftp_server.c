@@ -57,57 +57,20 @@ int main(int argc, char** argv)
     return 0;
 }
 
-int send_packet(int sockfd, Address* client, String* packet)
-{
-    int bytes_sent;
-    if ((bytes_sent = sendto(
-             sockfd,
-             packet->data,
-             packet->len,
-             0,
-             Address_sockaddr(client),
-             client->addrlen
-         )) < 0) {
-        int sendto_err = errno;
-        fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
-        return -1;
-    } else if (bytes_sent != packet->len) {
-        fprintf(
-            stderr,
-            "send_packet() error: %s\n",
-            "bytes sent were less than packet length"
-        );
-        return -1;
-    }
-    return bytes_sent;
-}
-
-int send_rawcmd_packet(int sockfd, Address* client, const char* outcmd)
-{
-    String packet = String_create((char*)outcmd, 3);
-    int bytes_sent_or_error = send_packet(sockfd, client, &packet);
-    String_free(&packet);
-    return bytes_sent_or_error;
-}
-
-int send_s_packet(
-    int sockfd,
-    Address* client,
-    uint32_t count,
-    const char* outcmd
-)
+int send_s_packet(int sockfd, Address* to, uint32_t count, const char* outcmd)
 {
     String packet = String_create((char*)outcmd, 3);
     String_push_u32(&packet, htonl(count));
-    int bytes_sent_or_error = send_packet(sockfd, client, &packet);
+    int bytes_sent_or_error =
+        send_packet(sockfd, to, StringView_create(&packet, 0, packet.len));
     String_free(&packet);
     return bytes_sent_or_error;
 }
 
 int send_n_packet(
     int sockfd,
-    Address* client,
-    String* line,
+    Address* to,
+    String* payload,
     uint32_t seq,
     const char* outcmd
 )
@@ -117,12 +80,13 @@ int send_n_packet(
     // 2 uint32_t for length and seq
     String_push_u32(
         &packet,
-        htonl(line->len + strlen(outcmd) + sizeof(uint32_t) * 2)
+        htonl(payload->len + strlen(outcmd) + sizeof(uint32_t) * 2)
     );
     String_push_u32(&packet, htonl(seq));
-    String_push_copy(&packet, line);
+    String_push_copy(&packet, payload);
 
-    int bytes_sent_or_error = send_packet(sockfd, client, &packet);
+    int bytes_sent_or_error =
+        send_packet(sockfd, to, StringView_create(&packet, 0, packet.len));
     String_free(&packet);
     return bytes_sent_or_error;
     return 0;
@@ -151,7 +115,8 @@ int handle_input(
     int bytes_sent_or_error;
     // exit
     if (strncmp("EXT", packet_recv->data, 3) == 0) {
-        bytes_sent_or_error = send_rawcmd_packet(sockfd, client, "GDB");
+        bytes_sent_or_error =
+            send_packet(sockfd, client, StringView_from_cstr("GDB"));
         if (bytes_sent_or_error < 0) {
             return bytes_sent_or_error;
         }
@@ -187,7 +152,8 @@ int handle_input(
     }
     // unknown command, send error
     else {
-        bytes_sent_or_error = send_rawcmd_packet(sockfd, client, "CER");
+        bytes_sent_or_error =
+            send_packet(sockfd, client, StringView_from_cstr("CER"));
         if (bytes_sent_or_error < 0) {
             return bytes_sent_or_error;
         }
@@ -207,12 +173,11 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
     char buffer[256];
     memset(buffer, 0, sizeof(buffer));
 
-    struct sockaddr_storage client_addr;
-    socklen_t client_addr_len;
+    Address client;
     int bytes_recv;
     while (1) {
-        memset(&client_addr, 0, sizeof(client_addr));
-        client_addr_len = sizeof(client_addr);
+        memset(&client, 0, sizeof(client));
+        client.addrlen = sizeof(client.addrlen);
 
         int num_events = poll(pfds, 1, 2500);
         if (num_events != 0) {
@@ -222,13 +187,13 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
                     buffer,
                     sizeof(buffer),
                     0,
-                    (struct sockaddr*)&client_addr,
-                    &client_addr_len
+                    Address_sockaddr(&client),
+                    &client.addrlen
                 );
 
                 if (bytes_recv >= 0) {
                     Address* current_client =
-                        get_client(&cl, &client_addr, client_addr_len);
+                        get_client(&cl, &client.addr, client.addrlen);
                     print_input(current_client, buffer, bytes_recv);
                     String packet_recv = String_create(buffer, bytes_recv);
                     if (handle_input(

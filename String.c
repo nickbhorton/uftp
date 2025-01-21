@@ -96,7 +96,7 @@ char* String_to_cstr(String* s)
     return s_cstr;
 }
 
-char String_get(String* s, size_t index)
+char String_get(const String* s, size_t index)
 {
     if (index < s->len) {
         return s->data[index];
@@ -260,7 +260,7 @@ void String_push_i16(String* s, int16_t num)
     String_push_move(s, serialized_int);
 }
 
-uint32_t String_parse_u32(String* s, size_t loc)
+uint32_t String_parse_u32(const String* s, size_t loc)
 {
     if (loc + sizeof(uint32_t) > s->len) {
         printf("String_parse string not long enough for parse\n");
@@ -268,7 +268,7 @@ uint32_t String_parse_u32(String* s, size_t loc)
     }
     return *((uint32_t*)&s->data[loc]);
 }
-uint16_t String_parse_u16(String* s, size_t loc)
+uint16_t String_parse_u16(const String* s, size_t loc)
 {
     if (loc + sizeof(uint16_t) > s->len) {
         printf("String_parse string not long enough for parse\n");
@@ -276,7 +276,7 @@ uint16_t String_parse_u16(String* s, size_t loc)
     }
     return *((uint16_t*)&s->data[loc]);
 }
-int32_t String_parse_i32(String* s, size_t loc)
+int32_t String_parse_i32(const String* s, size_t loc)
 {
     if (loc + sizeof(int32_t) > s->len) {
         printf("String_parse string not long enough for parse\n");
@@ -284,11 +284,40 @@ int32_t String_parse_i32(String* s, size_t loc)
     }
     return *((int32_t*)&s->data[loc]);
 }
-int16_t String_parse_i16(String* s, size_t loc)
+int16_t String_parse_i16(const String* s, size_t loc)
 {
     if (loc + sizeof(int16_t) > s->len) {
         printf("String_parse string not long enough for parse\n");
         return 0;
     }
     return *((int16_t*)&s->data[loc]);
+}
+
+StringView StringView_create(const String* s, size_t start_inc, size_t end_ninc)
+{
+    if (start_inc + end_ninc >= s->len || start_inc >= s->len) {
+        fprintf(stderr, "StringView is going to overrun String data buffer\n");
+    }
+    if (((int)end_ninc) - ((int)start_inc) < 0) {
+        fprintf(
+            stderr,
+            "StringView end is less than start, setting length to zero "
+            "instead\n"
+        );
+        StringView sv = {.data = s->data + start_inc, .len = 0};
+        return sv;
+    }
+    StringView sv = {.data = s->data + start_inc, .len = end_ninc - start_inc};
+    return sv;
+}
+
+StringView StringView_from_cstr(const char* data)
+{
+    StringView sv = {.data = data, .len = strlen(data)};
+    return sv;
+}
+
+void String_push_sv(String* to, StringView from)
+{
+    String_insertn(to, (char*)from.data, to->len, from.len);
 }

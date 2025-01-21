@@ -1,4 +1,5 @@
 #include "uftp.h"
+#include <stdint.h>
 
 UdpBoundSocket get_udp_socket(const char* addr, const char* port)
 {
@@ -123,5 +124,121 @@ uint16_t Address_port(Address* a)
     } else if (a->addr.ss_family == AF_INET6) {
         return ntohs(((struct sockaddr_in6*)&a->addr)->sin6_port);
     }
+    return 0;
+}
+
+int send_packet(int sockfd, Address* to, StringView packet)
+{
+    int bytes_sent;
+    if ((bytes_sent = sendto(
+             sockfd,
+             packet.data,
+             packet.len,
+             0,
+             Address_sockaddr(to),
+             to->addrlen
+         )) < 0) {
+        int sendto_err = errno;
+        fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
+        return -1;
+    } else if (bytes_sent != packet.len) {
+        fprintf(
+            stderr,
+            "send_packet() error: %s\n",
+            "bytes sent were less than packet length"
+        );
+        return -1;
+    }
+    return bytes_sent;
+}
+
+int recv_packet(int sockfd, Address* from, String* packet_o)
+{
+    static bool buff_init = false;
+    static char buffer[UFTP_BUFFER_SIZE];
+    if (!buff_init) {
+        memset(buffer, 0, UFTP_BUFFER_SIZE);
+        buff_init = true;
+    }
+    int bytes_recv = recvfrom(
+        sockfd,
+        buffer,
+        sizeof(buffer),
+        0,
+        (struct sockaddr*)&from->addr,
+        &from->addrlen
+    );
+
+    if (bytes_recv >= 0) {
+        *packet_o = String_create(buffer, bytes_recv);
+        memset(buffer, 0, bytes_recv);
+        return bytes_recv;
+    } else {
+        int recvfrom_err = errno;
+        fprintf(stderr, "recv_packet() error: %s\n", strerror(recvfrom_err));
+        return -1;
+    }
+}
+
+int send_sequenced_packet(
+    int sockfd,
+    Address* to,
+    char header[3],
+    uint32_t seq_number,
+    uint32_t seq_total,
+    StringView payload
+)
+{
+    String packet = String_create(header, 3);
+
+    String_push_u32(&packet, htonl(payload.len));
+    String_push_u32(&packet, htonl(seq_number));
+    String_push_u32(&packet, htonl(seq_total));
+    String_push_sv(&packet, payload);
+
+    int bytes_sent_or_error =
+        send_packet(sockfd, to, StringView_create(&packet, 0, packet.len));
+    String_free(&packet);
+    return bytes_sent_or_error;
+}
+
+int parse_sequenced_packet(
+    const String* packet,
+    char header_o[UFTP_HEADER_SIZE],
+    uint32_t* seq_number_o,
+    uint32_t* seq_total_o,
+    String* payload_o
+)
+{
+    if (packet->len < UFTP_HEADER_SIZE + 3 * sizeof(uint32_t)) {
+        fprintf(
+            stderr,
+            "parse_sequence_packet() error, packet length was not long enough "
+            "for parsing\n"
+        );
+        return -1;
+    }
+    for (size_t i = 0; i < UFTP_HEADER_SIZE; i++) {
+        header_o[i] = String_get(packet, i);
+    }
+    uint32_t payload_len = ntohl(String_parse_u32(packet, UFTP_HEADER_SIZE));
+    if (packet->len < UFTP_HEADER_SIZE + 3 * sizeof(uint32_t) + payload_len) {
+        fprintf(
+            stderr,
+            "parse_sequence_packet() error, packet length was not long enough "
+            "for payload\n"
+        );
+        return -1;
+    }
+    *seq_number_o =
+        ntohl(String_parse_u32(packet, UFTP_HEADER_SIZE + 1 * sizeof(uint32_t))
+        );
+    *seq_total_o =
+        ntohl(String_parse_u32(packet, UFTP_HEADER_SIZE + 2 * sizeof(uint32_t))
+        );
+    *payload_o = String_create(
+        packet->data + UFTP_HEADER_SIZE + 3 * sizeof(uint32_t),
+        payload_len
+    );
     return 0;
 }

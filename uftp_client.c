@@ -172,7 +172,11 @@ int handle_ls_response(struct pollfd* server_pollfd, Address* server_address)
     return 0;
 }
 
-int handle_get_response(struct pollfd* server_pollfd, Address* server_address)
+int recieve_file(
+    struct pollfd* sock_poll,
+    Address* address,
+    String* filename_to_recv
+)
 {
     char msg_buffer[BUFFER_LENGTH];
     memset(msg_buffer, 0, sizeof(msg_buffer));
@@ -186,17 +190,17 @@ int handle_get_response(struct pollfd* server_pollfd, Address* server_address)
             number_packets_to_recv != 0) {
             break;
         }
-        int num_events = poll(server_pollfd, 1, 2500);
+        int num_events = poll(sock_poll, 1, 2500);
 
         if (num_events != 0) {
-            if (server_pollfd[0].revents & POLLIN) {
+            if (sock_poll[0].revents & POLLIN) {
                 int bytes_recv = recvfrom(
-                    server_pollfd[0].fd,
+                    sock_poll[0].fd,
                     msg_buffer,
                     sizeof(msg_buffer),
                     0,
-                    Address_sockaddr(server_address),
-                    &server_address->addrlen
+                    Address_sockaddr(address),
+                    &address->addrlen
                 );
                 if (bytes_recv > 0) {
                     String packet = String_create(msg_buffer, bytes_recv);
@@ -205,10 +209,7 @@ int handle_get_response(struct pollfd* server_pollfd, Address* server_address)
                         number_packets_to_recv =
                             ntohl(String_parse_u32(&packet, 3));
                         if (DEBUG) {
-                            printf(
-                                "to recv %u filenames\n",
-                                number_packets_to_recv
-                            );
+                            printf("to recv %u\n", number_packets_to_recv);
                         }
                     } else if (String_cmp_cstr(&head, "FGN") == 0 &&
                                packet.len >= 11) {
@@ -224,11 +225,9 @@ int handle_get_response(struct pollfd* server_pollfd, Address* server_address)
                         }
                         uint32_t packet_seq =
                             ntohl(String_parse_u32(&packet, 7));
-                        String file_seq_and_content =
-                            String_create(packet.data + 7, packet.len - 7);
                         StringVector_push_back_move(
                             &file,
-                            file_seq_and_content
+                            String_create(packet.data + 7, packet.len - 7)
                         );
                         if (DEBUG) {
                             printf(" %u\n", packet_seq);
@@ -237,7 +236,7 @@ int handle_get_response(struct pollfd* server_pollfd, Address* server_address)
                     } else {
                         fprintf(
                             stderr,
-                            "handle_get_response, strange packet found\n"
+                            "when recieving N/S packets, strange packet found\n"
                         );
                         String_print(&head, true);
                         String_dbprint_hex(&packet);
@@ -262,9 +261,7 @@ int handle_get_response(struct pollfd* server_pollfd, Address* server_address)
     StringVector_free(&file);
 
     // to file
-    String outfilename = String_from_cstr("client.out");
-    String_to_file(&file_content, &outfilename);
-    String_free(&outfilename);
+    String_to_file(&file_content, filename_to_recv);
     String_free(&file_content);
     return 0;
 }
@@ -377,18 +374,23 @@ int main(int argc, char** argv)
                                 &get_command,
                                 htonl(3 + sizeof(uint32_t) + filename.len)
                             );
-                            String_push_move(&get_command, filename);
+                            String_push_copy(&get_command, &filename);
 
                             int bs_or_err =
                                 send_cmd(bs.fd, &server_address, &get_command);
                             if (bs_or_err < 0) {
+                                String_free(&filename);
                                 String_free(&get_command);
                                 return -bs_or_err;
                             }
 
                             String_free(&get_command);
-                            bs_or_err =
-                                handle_get_response(&pfds[1], &server_address);
+                            bs_or_err = recieve_file(
+                                &pfds[1],
+                                &server_address,
+                                &filename
+                            );
+                            String_free(&filename);
                             if (bs_or_err < 0) {
                                 String_free(&cmd);
                                 return bs_or_err;

@@ -19,7 +19,7 @@ String String_create(char* arr, size_t size);
 void String_push_back(String* s, char c);
 
 // bounds checked access
-char String_get(String* s, size_t index);
+char String_get(const String* s, size_t index);
 void String_set(String* s, size_t index, char c);
 
 void String_free(String* s);
@@ -33,10 +33,10 @@ void String_push_u16(String* s, uint16_t num);
 void String_push_i32(String* s, int32_t num);
 void String_push_i16(String* s, int16_t num);
 
-uint32_t String_parse_u32(String* s, size_t loc);
-uint16_t String_parse_u16(String* s, size_t loc);
-int32_t String_parse_i32(String* s, size_t loc);
-int16_t String_parse_i16(String* s, size_t loc);
+uint32_t String_parse_u32(const String* s, size_t loc);
+uint16_t String_parse_u16(const String* s, size_t loc);
+int32_t String_parse_i32(const String* s, size_t loc);
+int16_t String_parse_i16(const String* s, size_t loc);
 
 // if 0 strings are equal
 // if -1 strings are not of equal length
@@ -59,5 +59,16 @@ String String_from_cstr(const char* s);
 
 // free responsiblity is given to the caller
 char* String_to_cstr(String* s);
+
+typedef struct {
+    const char* data;
+    size_t len;
+} StringView;
+
+StringView
+StringView_create(const String* s, size_t start_inc, size_t end_ninc);
+StringView StringView_from_cstr(const char* data);
+
+void String_push_sv(String* to, StringView from);
 
 #endif
