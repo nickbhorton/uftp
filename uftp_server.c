@@ -136,7 +136,7 @@ int send_file(int sockfd, Address* client, String* filename)
         String_free(&contents);
         return bytes_sent_or_error;
     }
-    bytes_sent_or_error = send_n_packet(sockfd, client, &contents, 1, "GFN");
+    bytes_sent_or_error = send_n_packet(sockfd, client, &contents, 1, "FGN");
     String_free(&contents);
     return bytes_sent_or_error;
 }

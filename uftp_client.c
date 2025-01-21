@@ -172,6 +172,103 @@ int handle_ls_response(struct pollfd* server_pollfd, Address* server_address)
     return 0;
 }
 
+int handle_get_response(struct pollfd* server_pollfd, Address* server_address)
+{
+    char msg_buffer[BUFFER_LENGTH];
+    memset(msg_buffer, 0, sizeof(msg_buffer));
+
+    uint32_t number_packets_to_recv = 0;
+    uint32_t number_packets_recv = 0;
+    StringVector file = StringVector_new();
+
+    while (1) {
+        if (number_packets_recv == number_packets_to_recv &&
+            number_packets_to_recv != 0) {
+            break;
+        }
+        int num_events = poll(server_pollfd, 1, 2500);
+
+        if (num_events != 0) {
+            if (server_pollfd[0].revents & POLLIN) {
+                int bytes_recv = recvfrom(
+                    server_pollfd[0].fd,
+                    msg_buffer,
+                    sizeof(msg_buffer),
+                    0,
+                    Address_sockaddr(server_address),
+                    &server_address->addrlen
+                );
+                if (bytes_recv > 0) {
+                    String packet = String_create(msg_buffer, bytes_recv);
+                    String head = String_create(msg_buffer, 3);
+                    if (String_cmp_cstr(&head, "FGS") == 0 && packet.len == 7) {
+                        number_packets_to_recv =
+                            ntohl(String_parse_u32(&packet, 3));
+                        if (DEBUG) {
+                            printf(
+                                "to recv %u filenames\n",
+                                number_packets_to_recv
+                            );
+                        }
+                    } else if (String_cmp_cstr(&head, "FGN") == 0 &&
+                               packet.len >= 11) {
+                        uint32_t packet_length =
+                            ntohl(String_parse_u32(&packet, 3));
+                        if (packet.len != packet_length) {
+                            fprintf(
+                                stderr,
+                                "FLN packet was the wrong size, %u, %zu\n",
+                                packet_length,
+                                packet.len
+                            );
+                        }
+                        uint32_t packet_seq =
+                            ntohl(String_parse_u32(&packet, 7));
+                        String file_seq_and_content =
+                            String_create(packet.data + 7, packet.len - 7);
+                        StringVector_push_back_move(
+                            &file,
+                            file_seq_and_content
+                        );
+                        if (DEBUG) {
+                            printf(" %u\n", packet_seq);
+                        }
+                        number_packets_recv++;
+                    } else {
+                        fprintf(
+                            stderr,
+                            "handle_get_response, strange packet found\n"
+                        );
+                        String_print(&head, true);
+                        String_dbprint_hex(&packet);
+                    }
+                    String_free(&packet);
+                    String_free(&head);
+                }
+            }
+        } else {
+            fprintf(stderr, "timed out\n");
+            break;
+        }
+    }
+    String file_content = String_new();
+    for (size_t i = 0; i < file.len; i++) {
+        String content = String_create(
+            StringVector_get(&file, i)->data + 4,
+            StringVector_get(&file, i)->len - 4
+        );
+        String_push_move(&file_content, content);
+    }
+    StringVector_free(&file);
+
+    // to file
+    String outfilename = String_from_cstr("client.out");
+    String_to_file(&file_content, &outfilename);
+    String_free(&outfilename);
+    String_free(&file_content);
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if (validate_address(argc, argv) < 0) {
@@ -248,6 +345,7 @@ int main(int argc, char** argv)
                         bs_or_err =
                             handle_ls_response(&pfds[1], &server_address);
                         if (bs_or_err < 0) {
+                            String_free(&cmd);
                             return bs_or_err;
                         }
                     } else if (String_cmp_cstr(&cmd, "exit") == 0) {
@@ -258,12 +356,12 @@ int main(int argc, char** argv)
                             String_free(&ext_command);
                             return -bs_or_err;
                         }
+                        String_free(&ext_command);
                         bs_or_err =
                             handle_exit_response(&pfds[1], &server_address);
                         if (bs_or_err < 0) {
                             return -bs_or_err;
                         }
-                        String_free(&ext_command);
                         String_free(&cmd);
                         // exit from while loop
                         break;
@@ -274,8 +372,27 @@ int main(int argc, char** argv)
                                 StringVector_get(&sv, 1)->data,
                                 StringVector_get(&sv, 1)->len
                             );
-                            String_print(&filename, true);
-                            String_free(&filename);
+                            String get_command = String_from_cstr("GFL");
+                            String_push_u32(
+                                &get_command,
+                                htonl(3 + sizeof(uint32_t) + filename.len)
+                            );
+                            String_push_move(&get_command, filename);
+
+                            int bs_or_err =
+                                send_cmd(bs.fd, &server_address, &get_command);
+                            if (bs_or_err < 0) {
+                                String_free(&get_command);
+                                return -bs_or_err;
+                            }
+
+                            String_free(&get_command);
+                            bs_or_err =
+                                handle_get_response(&pfds[1], &server_address);
+                            if (bs_or_err < 0) {
+                                String_free(&cmd);
+                                return bs_or_err;
+                            }
                         } else {
                             printf("-uftp_client: ");
                             printf(": usage is 'get <filename>'\n");
