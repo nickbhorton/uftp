@@ -21,16 +21,13 @@
 void useage();
 int validate_port(int argc, char** argv);
 
-int server_loop(int sockfd, StringVector* filenames);
+int server_loop(UdpBoundSocket* bs, StringVector* filenames);
 
-void print_input(
-    int bytes_recv,
-    struct sockaddr_storage* client_addr,
-    char* msg
-);
+void print_input(Address* client, char* msg, int bytes_recv);
+
 int handle_input(
     int sockfd,
-    client_info_t* client,
+    Address* client,
     String* packet_recv,
     StringVector* filenames
 );
@@ -47,20 +44,20 @@ int main(int argc, char** argv)
     String_free(&if_name);
     String_free(&if_content);
 
-    int sockfd;
-    if ((sockfd = get_udp_socket(NULL, argv[1])) < 0) {
+    UdpBoundSocket bs;
+    if ((bs = get_udp_socket(NULL, argv[1])).fd < 0) {
         StringVector_free(&filenames);
         return 1;
     }
 
-    if (server_loop(sockfd, &filenames) < 0) {
-        close(sockfd);
+    if (server_loop(&bs, &filenames) < 0) {
+        close(bs.fd);
     }
     StringVector_free(&filenames);
     return 0;
 }
 
-int send_packet(int sockfd, client_info_t* client, String* packet)
+int send_packet(int sockfd, Address* client, String* packet)
 {
     int bytes_sent;
     if ((bytes_sent = sendto(
@@ -68,8 +65,8 @@ int send_packet(int sockfd, client_info_t* client, String* packet)
              packet->data,
              packet->len,
              0,
-             (const struct sockaddr*)&client->addr,
-             client->addr_len
+             Address_sockaddr(client),
+             client->addrlen
          )) < 0) {
         int sendto_err = errno;
         fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
@@ -85,7 +82,7 @@ int send_packet(int sockfd, client_info_t* client, String* packet)
     return bytes_sent;
 }
 
-int send_rawcmd_packet(int sockfd, client_info_t* client, const char* outcmd)
+int send_rawcmd_packet(int sockfd, Address* client, const char* outcmd)
 {
     String packet = String_create((char*)outcmd, 3);
     int bytes_sent_or_error = send_packet(sockfd, client, &packet);
@@ -95,7 +92,7 @@ int send_rawcmd_packet(int sockfd, client_info_t* client, const char* outcmd)
 
 int send_s_packet(
     int sockfd,
-    client_info_t* client,
+    Address* client,
     uint32_t count,
     const char* outcmd
 )
@@ -109,7 +106,7 @@ int send_s_packet(
 
 int send_n_packet(
     int sockfd,
-    client_info_t* client,
+    Address* client,
     String* line,
     uint32_t seq,
     const char* outcmd
@@ -131,7 +128,7 @@ int send_n_packet(
     return 0;
 }
 
-int send_file(int sockfd, client_info_t* client, String* filename)
+int send_file(int sockfd, Address* client, String* filename)
 {
     String contents = String_from_file(filename);
     int bytes_sent_or_error = send_s_packet(sockfd, client, 1, "FGS");
@@ -146,7 +143,7 @@ int send_file(int sockfd, client_info_t* client, String* filename)
 
 int handle_input(
     int sockfd,
-    client_info_t* client,
+    Address* client,
     String* packet_recv,
     StringVector* filenames
 )
@@ -198,16 +195,16 @@ int handle_input(
     return 0;
 }
 
-int server_loop(int sockfd, StringVector* filenames)
+int server_loop(UdpBoundSocket* bs, StringVector* filenames)
 {
     struct pollfd pfds[1];
-    pfds[0].fd = sockfd;
+    pfds[0].fd = bs->fd;
     pfds[0].events = POLLIN;
 
     client_list_t cl;
     client_list_init(&cl);
 
-    char buffer[128];
+    char buffer[256];
     memset(buffer, 0, sizeof(buffer));
 
     struct sockaddr_storage client_addr;
@@ -230,12 +227,12 @@ int server_loop(int sockfd, StringVector* filenames)
                 );
 
                 if (bytes_recv >= 0) {
-                    client_info_t* current_client =
+                    Address* current_client =
                         get_client(&cl, &client_addr, client_addr_len);
-                    print_input(bytes_recv, &client_addr, buffer);
+                    print_input(current_client, buffer, bytes_recv);
                     String packet_recv = String_create(buffer, bytes_recv);
                     if (handle_input(
-                            sockfd,
+                            bs->fd,
                             current_client,
                             &packet_recv,
                             filenames
@@ -264,31 +261,22 @@ int server_loop(int sockfd, StringVector* filenames)
     return 0;
 }
 
-void print_input(
-    int bytes_recv,
-    struct sockaddr_storage* client_addr,
-    char* msg
-)
+void print_input(Address* client, char* msg, int bytes_recv)
 {
     char client_addr_str[INET6_ADDRSTRLEN];
     memset(&client_addr_str, 0, sizeof(client_addr_str));
     printf(
-        "%s",
+        "%s:%u(%i): %s\n",
         inet_ntop(
-            client_addr->ss_family,
-            get_in_addr((struct sockaddr*)client_addr),
+            client->addr.ss_family,
+            Address_in_addr(client),
             client_addr_str,
             sizeof(client_addr_str)
-        )
+        ),
+        Address_port(client),
+        bytes_recv,
+        msg
     );
-    if (client_addr->ss_family == AF_INET) {
-        printf(":%u", ntohs(((struct sockaddr_in*)client_addr)->sin_port));
-    } else if (client_addr->ss_family == AF_INET6) {
-        printf(":%u", ntohs(((struct sockaddr_in6*)client_addr)->sin6_port));
-    }
-
-    printf("(%i): ", bytes_recv);
-    printf("%s\n", msg);
 }
 
 int validate_port(int argc, char** argv)

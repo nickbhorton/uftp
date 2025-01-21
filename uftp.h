@@ -14,9 +14,20 @@
 
 #include <arpa/inet.h>
 
-// directly from beej.us with no changes
-void* get_in_addr(struct sockaddr* sa);
+typedef struct {
+    struct sockaddr_storage addr;
+    socklen_t addrlen;
+} Address;
 
-int get_udp_socket(const char* addr, const char* port);
+struct sockaddr* Address_sockaddr(Address* a);
+void* Address_in_addr(Address* a);
+uint16_t Address_port(Address* a);
+
+typedef struct {
+    int fd;
+    Address address;
+} UdpBoundSocket;
+
+UdpBoundSocket get_udp_socket(const char* addr, const char* port);
 
 #endif

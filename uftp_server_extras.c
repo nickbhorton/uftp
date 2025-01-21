@@ -6,17 +6,17 @@
 
 static int debug = 1;
 
-int client_cmp(
-    const client_info_t* c1,
+int Address_cmp(
+    const Address* address,
     const struct sockaddr_storage* c2_addr,
     const socklen_t c2_addr_len
 )
 {
-    if (c1->addr_len != c2_addr_len) {
+    if (address->addrlen != c2_addr_len) {
         return -1;
     }
-    for (size_t i = 0; i < c1->addr_len; i++) {
-        if (!(((char*)&c1->addr)[i] == ((char*)c2_addr)[i])) {
+    for (size_t i = 0; i < address->addrlen; i++) {
+        if (!(((char*)&address->addr)[i] == ((char*)c2_addr)[i])) {
             return i + 1;
         }
     }
@@ -38,14 +38,14 @@ void client_list_free(client_list_t* client_list)
     free(client_list->clients);
 }
 
-client_info_t* get_client(
+Address* get_client(
     client_list_t* client_list,
     struct sockaddr_storage* client_addr,
     const socklen_t client_addr_len
 )
 {
     for (size_t ci = 0; ci < client_list->len; ci++) {
-        if (client_cmp(
+        if (Address_cmp(
                 client_list->clients[ci],
                 client_addr,
                 client_addr_len
@@ -60,25 +60,24 @@ client_info_t* get_client(
     // make sure there is enough memory for a new client
     if (client_list->cap == 0) {
         unsigned int starting_cap = 8;
-        client_list->clients = malloc(sizeof(client_info_t*) * starting_cap);
+        client_list->clients = malloc(sizeof(Address*) * starting_cap);
         client_list->cap = starting_cap;
     } else {
         while (client_list->cap < client_list->len + 1) {
             client_list->cap = client_list->cap * 2;
             client_list->clients = realloc(
                 client_list->clients,
-                sizeof(client_info_t*) * client_list->cap
+                sizeof(Address*) * client_list->cap
             );
         }
     }
     // allocate, clear and fill
-    client_list->clients[client_list->len] =
-        (client_info_t*)malloc(sizeof(client_info_t));
-    memset(client_list->clients[client_list->len], 0, sizeof(client_info_t));
+    client_list->clients[client_list->len] = (Address*)malloc(sizeof(Address));
+    memset(client_list->clients[client_list->len], 0, sizeof(Address));
     client_list->clients[client_list->len]->addr = *client_addr;
-    client_list->clients[client_list->len]->addr_len = client_addr_len;
+    client_list->clients[client_list->len]->addrlen = client_addr_len;
 
-    client_info_t* client_to_return = client_list->clients[client_list->len];
+    Address* client_to_return = client_list->clients[client_list->len];
 
     // incremement length
     client_list->len++;

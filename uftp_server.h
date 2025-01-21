@@ -5,15 +5,12 @@
 
 #include <sys/socket.h>
 
-typedef struct client_info_s {
-    struct sockaddr_storage addr;
-    socklen_t addr_len;
-} client_info_t;
+#include "uftp.h"
 
-typedef struct client_list_s {
+typedef struct {
     size_t len;
     size_t cap;
-    client_info_t** clients;
+    Address** clients;
 } client_list_t;
 
 void client_list_init(client_list_t* client_list);
@@ -24,7 +21,7 @@ void client_list_free(client_list_t* client_list);
 // client
 // 2. creates a new client in the client_list and return a pointer to said
 // client
-client_info_t* get_client(
+Address* get_client(
     client_list_t* client_list,
     struct sockaddr_storage* client_addr,
     const socklen_t client_addr_len

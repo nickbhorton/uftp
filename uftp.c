@@ -1,7 +1,9 @@
 #include "uftp.h"
 
-int get_udp_socket(const char* addr, const char* port)
+UdpBoundSocket get_udp_socket(const char* addr, const char* port)
 {
+    UdpBoundSocket bound_sock;
+
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET; // ipv4
@@ -15,27 +17,35 @@ int get_udp_socket(const char* addr, const char* port)
     ret = getaddrinfo(addr, port, &hints, &address_info);
     if (ret != 0) {
         fprintf(stderr, "getaddrinfo() error: %s\n", gai_strerror(ret));
-        return -1;
+
+        // error value goes into sockfd of bound_sock
+        memset(&bound_sock, 0, sizeof(bound_sock));
+        bound_sock.fd = -1;
+        return bound_sock;
     }
 
     // linked list traversal vibe from beej.us
-    int sfd;
     struct addrinfo* ptr;
     for (ptr = address_info; ptr != NULL; ptr = ptr->ai_next) {
-        if ((sfd = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol)) <
+        if ((bound_sock.fd =
+                 socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol)) <
             0) {
             int sock_err = errno;
             fprintf(stderr, "socket() error: %s\n", strerror(sock_err));
             continue; // next loop
         }
-        if ((bind(sfd, ptr->ai_addr, ptr->ai_addrlen)) < 0) {
+        if ((bind(bound_sock.fd, ptr->ai_addr, ptr->ai_addrlen)) < 0) {
+            // put current address into bound_sock
+            memcpy(&bound_sock.address.addr, ptr->ai_addr, ptr->ai_addrlen);
+            bound_sock.address.addrlen = ptr->ai_addrlen;
+
             int sock_err = errno;
-            close(sfd);
+            close(bound_sock.fd);
             char failed_addr[INET6_ADDRSTRLEN];
             memset(&failed_addr, 0, sizeof(failed_addr));
             inet_ntop(
                 ptr->ai_family,
-                get_in_addr(ptr->ai_addr),
+                Address_in_addr(&bound_sock.address),
                 failed_addr,
                 sizeof(failed_addr)
             );
@@ -52,14 +62,22 @@ int get_udp_socket(const char* addr, const char* port)
 
     if (ptr == NULL) {
         fprintf(stderr, "failed to find and bind a socket");
-        return -1;
+
+        // error value goes into sockfd of bound_sock
+        memset(&bound_sock, 0, sizeof(bound_sock));
+        bound_sock.fd = -1;
+        return bound_sock;
     }
+
+    // put success address into bound_sock
+    memcpy(&bound_sock.address.addr, ptr->ai_addr, ptr->ai_addrlen);
+    bound_sock.address.addrlen = ptr->ai_addrlen;
 
     char success_addr[INET6_ADDRSTRLEN];
     memset(&success_addr, 0, sizeof(success_addr));
     inet_ntop(
-        ptr->ai_family,
-        get_in_addr(ptr->ai_addr),
+        bound_sock.address.addr.ss_family,
+        Address_in_addr(&bound_sock.address),
         success_addr,
         sizeof(success_addr)
     );
@@ -69,21 +87,41 @@ int get_udp_socket(const char* addr, const char* port)
 
     // setting sockopts
     int yes = 1;
-    if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
+    if (setsockopt(bound_sock.fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) <
+        0) {
         int sock_err = errno;
         fprintf(stderr, "socket() error: %s\n", strerror(sock_err));
-        close(sfd);
-        return -1;
+        close(bound_sock.fd);
+
+        // error value goes into sockfd of bound_sock
+        memset(&bound_sock, 0, sizeof(bound_sock));
+        bound_sock.fd = -1;
+        return bound_sock;
     }
 
-    return sfd;
+    return bound_sock;
 }
 
-void* get_in_addr(struct sockaddr* sa)
+void* Address_in_addr(Address* a)
 {
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
+    if (a->addr.ss_family == AF_INET) {
+        return &(((struct sockaddr_in*)&a->addr)->sin_addr);
     }
 
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+    return &(((struct sockaddr_in6*)&a->addr)->sin6_addr);
+}
+
+struct sockaddr* Address_sockaddr(Address* a)
+{
+    return (struct sockaddr*)&a->addr;
+}
+
+uint16_t Address_port(Address* a)
+{
+    if (a->addr.ss_family == AF_INET) {
+        return ntohs(((struct sockaddr_in*)&a->addr)->sin_port);
+    } else if (a->addr.ss_family == AF_INET6) {
+        return ntohs(((struct sockaddr_in6*)&a->addr)->sin6_port);
+    }
+    return 0;
 }
