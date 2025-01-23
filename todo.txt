@@ -1,0 +1,4 @@
+- If server dir has no files send an indication.
+- sendto and recvfrom do not always return the right value. This must not make
+  server or client fail
+- Check out network emulators for testing sequencing and chunking

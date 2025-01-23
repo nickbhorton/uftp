@@ -1,2 +1,0 @@
-my_homework1.txt
-basic.txt

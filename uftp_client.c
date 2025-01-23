@@ -205,9 +205,7 @@ int recieve_file(
     StringVector_free(&file);
 
     // to file
-    String debug_filename = String_from_cstr("out.client");
-    String_to_file(&file_content, &debug_filename);
-    String_free(&debug_filename);
+    String_to_file(&file_content, filename_to_recv);
     String_free(&file_content);
     return 0;
 }
@@ -255,172 +253,171 @@ int main(int argc, char** argv)
     pfds[1].events = POLLIN;
 
     char msg_buffer[UFTP_BUFFER_SIZE];
-    memset(msg_buffer, 0, sizeof(msg_buffer));
+    memset(msg_buffer, 0, UFTP_BUFFER_SIZE);
 
     Address server;
-    int bytes_recv;
+    // byte count or err
+    int bc_or_err;
     bool timed_out = false;
     while (1) {
         if (!timed_out) {
             printf("> ");
             fflush(stdout);
         }
-        int num_events = poll(pfds, 2, timeout_ms);
-        if (num_events != 0) {
-            timed_out = false;
-            if (pfds[0].revents & POLLIN) {
-                bytes_recv = read(0, msg_buffer, sizeof(msg_buffer));
-                if (bytes_recv > 1) {
-                    // -1 to remove the \n for line buffered terminal?
-                    String cmd = String_create(msg_buffer, bytes_recv - 1);
-                    if (String_cmp_cstr(&cmd, "ls") == 0) {
-                        int bs_or_err = send_packet(
-                            bs.fd,
-                            &server_address,
-                            StringView_from_cstr("LST")
-                        );
-                        if (bs_or_err < 0) {
-                            String_free(&cmd);
-                            return -bs_or_err;
-                        }
-                        bs_or_err =
-                            handle_ls_response(&pfds[1], &server_address);
-                        if (bs_or_err < 0) {
-                            String_free(&cmd);
-                            return bs_or_err;
-                        }
-                    } else if (String_cmp_cstr(&cmd, "exit") == 0) {
-                        int bs_or_err = send_packet(
-                            bs.fd,
-                            &server_address,
-                            StringView_from_cstr("EXT")
-                        );
-                        if (bs_or_err < 0) {
-                            return -bs_or_err;
-                        }
-                        bs_or_err =
-                            handle_exit_response(&pfds[1], &server_address);
-                        if (bs_or_err < 0) {
-                            return -bs_or_err;
-                        }
+        int event_count = poll(pfds, 2, timeout_ms);
+        if (event_count == 0) {
+            timed_out = true;
+            continue;
+        }
+        timed_out = false;
+        if (pfds[0].revents & POLLIN) {
+            bc_or_err = read(0, msg_buffer, sizeof(msg_buffer));
+            if (bc_or_err > 1) {
+                // -1 to remove the \n for line buffered terminal?
+                String cmd = String_create(msg_buffer, bc_or_err - 1);
+                if (String_cmp_cstr(&cmd, "ls") == 0) {
+                    bc_or_err = send_packet(
+                        bs.fd,
+                        &server_address,
+                        StringView_from_cstr("LST")
+                    );
+                    if (bc_or_err < 0) {
                         String_free(&cmd);
-                        // exit from while loop
-                        break;
-                    } else if (String_cmpn_cstr(&cmd, "get", 3) == 0) {
-                        StringVector get_args =
-                            StringVector_from_split(&cmd, ' ');
-                        if (get_args.len >= 2) {
-                            String filename = String_create(
-                                StringVector_get(&get_args, 1)->data,
-                                StringVector_get(&get_args, 1)->len
-                            );
-                            int bs_or_err = send_sequenced_packet(
-                                bs.fd,
-                                &server_address,
-                                "GFL",
-                                1,
-                                1,
-                                StringView_create(&filename, 0, filename.len)
-                            );
-                            if (bs_or_err < 0) {
-                                String_free(&filename);
-                                String_free(&cmd);
-                                return -bs_or_err;
-                            }
-                            bs_or_err = recieve_file(
-                                &pfds[1],
-                                &server_address,
-                                &filename
-                            );
-                            if (bs_or_err < 0) {
-                                String_free(&filename);
-                                String_free(&cmd);
-                                return bs_or_err;
-                            } else if (bs_or_err == 1) {
-                                printf("uftp_client: ");
-                                String_print(&filename, false);
-                                printf(": No such file\n");
-                            }
-                            String_free(&filename);
-                        } else {
-                            printf("-uftp_client: ");
-                            printf(": usage is 'get <filename>'\n");
-                        }
-                        StringVector_free(&get_args);
-                    } else if (String_cmpn_cstr(&cmd, "put", 3) == 0) {
-                        StringVector get_args =
-                            StringVector_from_split(&cmd, ' ');
-                        if (get_args.len >= 2) {
-                            /*
-                            String filename = String_create(
-                                StringVector_get(&get_args, 1)->data,
-                                StringVector_get(&get_args, 1)->len
-                            );
-                            */
-                            String filename =
-                                String_from_cstr("smnt/files/basic.txt");
-                            int bs_or_err = send_sequenced_packet(
-                                bs.fd,
-                                &server_address,
-                                "PFL",
-                                1,
-                                1,
-                                StringView_create(&filename, 0, filename.len)
-                            );
-                            if (bs_or_err < 0) {
-                                String_free(&filename);
-                                String_free(&cmd);
-                                return -bs_or_err;
-                            }
-                            String contents = String_from_file(&filename);
-                            bs_or_err = send_sequenced_packet(
-                                bs.fd,
-                                &server_address,
-                                "FLQ",
-                                1,
-                                1,
-                                StringView_create(&contents, 0, contents.len)
-                            );
-                            if (bs_or_err < 0) {
-                                String_free(&contents);
-                                String_free(&filename);
-                                String_free(&cmd);
-                                return bs_or_err;
-                            }
-                            String_free(&contents);
-                            String_free(&filename);
-                        } else {
-                            printf("-uftp_client: ");
-                            printf(": usage is 'get <filename>'\n");
-                        }
-                        StringVector_free(&get_args);
-                    } else {
-                        printf("-uftp_client: ");
-                        String_print(&cmd, false);
-                        printf(": command not found\n");
+                        return -bc_or_err;
+                    }
+                    bc_or_err = handle_ls_response(&pfds[1], &server_address);
+                    if (bc_or_err < 0) {
+                        String_free(&cmd);
+                        return bc_or_err;
+                    }
+                } else if (String_cmp_cstr(&cmd, "exit") == 0) {
+                    bc_or_err = send_packet(
+                        bs.fd,
+                        &server_address,
+                        StringView_from_cstr("EXT")
+                    );
+                    if (bc_or_err < 0) {
+                        return -bc_or_err;
+                    }
+                    bc_or_err = handle_exit_response(&pfds[1], &server_address);
+                    if (bc_or_err < 0) {
+                        return -bc_or_err;
                     }
                     String_free(&cmd);
+                    // exit from while loop
+                    break;
+                } else if (String_cmpn_cstr(&cmd, "get", 3) == 0) {
+                    StringVector get_args = StringVector_from_split(&cmd, ' ');
+                    if (get_args.len >= 2) {
+                        String filename = String_create(
+                            StringVector_get(&get_args, 1)->data,
+                            StringVector_get(&get_args, 1)->len
+                        );
+                        bc_or_err = send_sequenced_packet(
+                            bs.fd,
+                            &server_address,
+                            "GFL",
+                            1,
+                            1,
+                            StringView_create(&filename, 0, filename.len)
+                        );
+                        if (bc_or_err < 0) {
+                            String_free(&filename);
+                            String_free(&cmd);
+                            return -bc_or_err;
+                        }
+                        bc_or_err =
+                            recieve_file(&pfds[1], &server_address, &filename);
+                        if (bc_or_err < 0) {
+                            String_free(&filename);
+                            String_free(&cmd);
+                            return bc_or_err;
+                        } else if (bc_or_err == 1) {
+                            printf("uftp_client: ");
+                            String_print(&filename, false);
+                            printf(": No such file\n");
+                        }
+                        String_free(&filename);
+                    } else {
+                        printf("-uftp_client: ");
+                        printf(": usage is 'get <filename>'\n");
+                    }
+                    StringVector_free(&get_args);
+                } else if (String_cmpn_cstr(&cmd, "put", 3) == 0) {
+                    StringVector get_args = StringVector_from_split(&cmd, ' ');
+                    if (get_args.len >= 2) {
+                        String filename = String_create(
+                            StringVector_get(&get_args, 1)->data,
+                            StringVector_get(&get_args, 1)->len
+                        );
+                        String contents = String_from_file(&filename);
+                        // TODO: this is a bad way to check this
+                        if (contents.len == 0 && contents.cap == 0) {
+                            printf("-uftp_client: ");
+                            printf(": No such file'\n");
+                            String_free(&filename);
+                            String_free(&cmd);
+                            continue;
+                        }
+                        bc_or_err = send_sequenced_packet(
+                            bs.fd,
+                            &server_address,
+                            "PFL",
+                            1,
+                            1,
+                            StringView_create(&filename, 0, filename.len)
+                        );
+                        if (bc_or_err < 0) {
+                            String_free(&contents);
+                            String_free(&filename);
+                            String_free(&cmd);
+                            return -bc_or_err;
+                        }
+                        bc_or_err = send_sequenced_packet(
+                            bs.fd,
+                            &server_address,
+                            "FLQ",
+                            1,
+                            1,
+                            StringView_create(&contents, 0, contents.len)
+                        );
+                        if (bc_or_err < 0) {
+                            String_free(&contents);
+                            String_free(&filename);
+                            String_free(&cmd);
+                            return bc_or_err;
+                        }
+                        String_free(&contents);
+                        String_free(&filename);
+                    } else {
+                        printf("-uftp_client: ");
+                        printf(": usage is 'get <filename>'\n");
+                    }
+                    StringVector_free(&get_args);
                 } else {
-                    int read_err = errno;
-                    fprintf(stderr, "read() error: %s\n", strerror(read_err));
-                    close(bs.fd);
-                    return 1;
+                    printf("-uftp_client: ");
+                    String_print(&cmd, false);
+                    printf(": command not found\n");
                 }
-            } else if (pfds[1].revents & POLLIN) {
-                String packet;
-                bytes_recv = recv_packet(pfds[1].fd, &server, &packet);
-                if (bytes_recv > 0) {
-                    String_dbprint_hex(&packet);
-                    String_free(&packet);
-                } else {
-                    String_free(&packet);
-                    return 1;
-                }
+                String_free(&cmd);
+            } else {
+                int read_err = errno;
+                fprintf(stderr, "read() error: %s\n", strerror(read_err));
+                close(bs.fd);
+                return 1;
             }
-        } else {
-            timed_out = true;
+        } else if (pfds[1].revents & POLLIN) {
+            String packet;
+            bc_or_err = recv_packet(pfds[1].fd, &server, &packet);
+            if (bc_or_err > 0) {
+                String_dbprint_hex(&packet);
+                String_free(&packet);
+            } else {
+                String_free(&packet);
+                return 1;
+            }
+            memset(msg_buffer, 0, sizeof(msg_buffer));
         }
-        memset(msg_buffer, 0, sizeof(msg_buffer));
     }
     close(bs.fd);
     return 0;

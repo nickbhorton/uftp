@@ -250,13 +250,12 @@ int handle_input(
     StringVector* filenames
 )
 {
-    int bytes_sent_or_error;
+    int ret;
     // exit
     if (strncmp("EXT", packet_recv->data, 3) == 0) {
-        bytes_sent_or_error =
-            send_packet(sock_poll->fd, client, StringView_from_cstr("GDB"));
-        if (bytes_sent_or_error < 0) {
-            return bytes_sent_or_error;
+        ret = send_packet(sock_poll->fd, client, StringView_from_cstr("GDB"));
+        if (ret < 0) {
+            return ret;
         }
     }
     // ls
@@ -278,38 +277,56 @@ int handle_input(
                 return bytes_sent_or_error;
             }
         }
-
     }
-    // get 'filename'
+    // get 'filename' from server
     else if (strncmp("GFL", packet_recv->data, 3) == 0) {
         char header[UFTP_HEADER_SIZE];
         uint32_t seq_number;
         uint32_t seq_total;
         String filename;
-        bytes_sent_or_error = parse_sequenced_packet(
+        ret = parse_sequenced_packet(
             packet_recv,
             header,
             &seq_number,
             &seq_total,
             &filename
         );
-        bytes_sent_or_error =
-            send_file(sock_poll->fd, client, &filename, filenames);
+        if (ret < 0) {
+            return ret;
+        }
+        ret = send_file(sock_poll->fd, client, &filename, filenames);
         String_free(&filename);
-        return bytes_sent_or_error;
-    } else if (strncmp("PFL", packet_recv->data, 3) == 0) {
-        // TODO: handle sequenced packet and actaully send the right file
-        String filename = String_from_cstr("test.server");
-        bytes_sent_or_error = recieve_file(sock_poll, client, &filename);
-        String_free(&filename);
-        return bytes_sent_or_error;
+        return ret;
+    }
+    // put 'filename' onto server
+    else if (strncmp("PFL", packet_recv->data, 3) == 0) {
+        char header[UFTP_HEADER_SIZE];
+        uint32_t seq_number;
+        uint32_t seq_total;
+        String filename;
+        ret = parse_sequenced_packet(
+            packet_recv,
+            header,
+            &seq_number,
+            &seq_total,
+            &filename
+        );
+        if (ret < 0) {
+            return ret;
+        }
+        ret = recieve_file(sock_poll, client, &filename);
+        if (ret < 0) {
+            String_free(&filename);
+            return ret;
+        }
+        StringVector_push_back_move(filenames, filename);
+        return ret;
     }
     // unknown command, send error
     else {
-        bytes_sent_or_error =
-            send_packet(sock_poll->fd, client, StringView_from_cstr("ERR"));
-        if (bytes_sent_or_error < 0) {
-            return bytes_sent_or_error;
+        ret = send_packet(sock_poll->fd, client, StringView_from_cstr("ERR"));
+        if (ret < 0) {
+            return ret;
         }
     }
     return 0;
