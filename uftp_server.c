@@ -92,9 +92,36 @@ int send_n_packet(
     return 0;
 }
 
-int send_file(int sockfd, Address* client, String* filename)
+int send_file(
+    int sockfd,
+    Address* client,
+    String* filename,
+    StringVector* valid_filenames
+)
 {
+    // if this file exists but is not in the list of valid filesnames also tell
+    // the client there is no file. the valid_filenames comes from running a
+    // regular ls in the working directory. This prevents the client from giving
+    // relative paths or absolute paths into potenetially sensitive data.
+    bool valid = false;
+    for (size_t i = 0; i < valid_filenames->len; i++) {
+        if (String_cmp(&valid_filenames->data[i], filename) == 0) {
+            valid = true;
+        }
+    }
+    if (!valid) {
+        int bytes_sent_or_error =
+            send_packet(sockfd, client, StringView_from_cstr("FNO"));
+        return bytes_sent_or_error;
+    }
+
     String contents = String_from_file(filename);
+    // its also possible that the file does not exist
+    if (contents.len == 0) {
+        int bytes_sent_or_error =
+            send_packet(sockfd, client, StringView_from_cstr("FNO"));
+        return bytes_sent_or_error;
+    }
     int bytes_sent_or_error = send_sequenced_packet(
         sockfd,
         client,
@@ -248,9 +275,19 @@ int handle_input(
     }
     // get 'filename'
     else if (strncmp("GFL", packet_recv->data, 3) == 0) {
-        // TODO: handle sequenced packet and actaully send the right file
-        String filename = String_from_cstr("smnt/files/basic.txt");
-        bytes_sent_or_error = send_file(sock_poll->fd, client, &filename);
+        char header[UFTP_HEADER_SIZE];
+        uint32_t seq_number;
+        uint32_t seq_total;
+        String filename;
+        bytes_sent_or_error = parse_sequenced_packet(
+            packet_recv,
+            header,
+            &seq_number,
+            &seq_total,
+            &filename
+        );
+        bytes_sent_or_error =
+            send_file(sock_poll->fd, client, &filename, filenames);
         String_free(&filename);
         return bytes_sent_or_error;
     } else if (strncmp("PFL", packet_recv->data, 3) == 0) {

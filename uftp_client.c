@@ -199,7 +199,9 @@ int recieve_file(
     StringVector_free(&file);
 
     // to file
-    String_to_file(&file_content, filename_to_recv);
+    String debug_filename = String_from_cstr("out.client");
+    String_to_file(&file_content, &debug_filename);
+    String_free(&debug_filename);
     String_free(&file_content);
     return 0;
 }
