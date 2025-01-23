@@ -17,6 +17,8 @@
 #include "StringVector.h"
 #include "uftp.h"
 
+static int timeout_ms = 1000;
+
 void useage();
 int validate_port(int argc, char** argv);
 
@@ -25,7 +27,7 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames);
 void print_input(Address* client, String* packet);
 
 int handle_input(
-    int sockfd,
+    struct pollfd* sock_poll,
     Address* client,
     String* packet_recv,
     StringVector* filenames
@@ -96,7 +98,7 @@ int send_file(int sockfd, Address* client, String* filename)
     int bytes_sent_or_error = send_sequenced_packet(
         sockfd,
         client,
-        "FGQ",
+        "FLQ",
         1,
         1,
         StringView_create(&contents, 0, contents.len)
@@ -105,8 +107,109 @@ int send_file(int sockfd, Address* client, String* filename)
     return bytes_sent_or_error;
 }
 
+int recieve_file(
+    struct pollfd* sock_poll,
+    Address* address,
+    String* filename_to_recv
+)
+{
+    char msg_buffer[UFTP_BUFFER_SIZE];
+    memset(msg_buffer, 0, sizeof(msg_buffer));
+
+    bool err = false;
+
+    uint32_t number_packets_to_recv = 0;
+    uint32_t number_packets_recv = 0;
+    StringVector file = StringVector_new();
+
+    while (1) {
+        if (number_packets_recv == number_packets_to_recv &&
+            number_packets_to_recv != 0) {
+            break;
+        }
+        int num_events = poll(sock_poll, 1, timeout_ms);
+        if (num_events != 0) {
+            if (sock_poll[0].revents & POLLIN) {
+                String packet;
+                int bytes_recv = recv_packet(sock_poll[0].fd, address, &packet);
+                number_packets_recv++;
+                if (bytes_recv < 0) {
+                    err = true;
+                } else {
+                    char header[UFTP_HEADER_SIZE];
+                    uint32_t seq_number;
+                    uint32_t seq_total;
+                    String payload;
+                    int ret = parse_sequenced_packet(
+                        &packet,
+                        header,
+                        &seq_number,
+                        &seq_total,
+                        &payload
+                    );
+                    String_free(&packet);
+                    if (ret < 0) {
+                        err = true;
+                    } else {
+                        if (strncmp(header, "FLQ", UFTP_HEADER_SIZE) != 0) {
+                            // not a critical error
+                            fprintf(
+                                stderr,
+                                "sequenced packet header for get was not "
+                                "correct\n"
+                            );
+                        }
+                        if (number_packets_to_recv == 0) {
+                            number_packets_to_recv = seq_total;
+                        } else if (seq_total != number_packets_to_recv) {
+                            // not a critical error
+                            fprintf(
+                                stderr,
+                                "sequenced packet seq_total did not match\n"
+                            );
+                        }
+                        StringVector_push_back_move(&file, payload);
+                    }
+                }
+            }
+        } else {
+            fprintf(stderr, "timed out\n");
+            err = true;
+            break;
+        }
+    }
+    if (err) {
+        StringVector_free(&file);
+        int ret =
+            send_packet(sock_poll[0].fd, address, StringView_from_cstr("ERR"));
+        if (ret < 0) {
+            return -1;
+        }
+        return 0;
+    }
+    String file_content = String_new();
+    for (size_t i = 0; i < file.len; i++) {
+        String content = String_create(
+            StringVector_get(&file, i)->data,
+            StringVector_get(&file, i)->len
+        );
+        String_push_move(&file_content, content);
+    }
+    StringVector_free(&file);
+
+    // to file
+    String_to_file(&file_content, filename_to_recv);
+    String_free(&file_content);
+    int ret =
+        send_packet(sock_poll[0].fd, address, StringView_from_cstr("SUC"));
+    if (ret < 0) {
+        return ret;
+    }
+    return 0;
+}
+
 int handle_input(
-    int sockfd,
+    struct pollfd* sock_poll,
     Address* client,
     String* packet_recv,
     StringVector* filenames
@@ -116,7 +219,7 @@ int handle_input(
     // exit
     if (strncmp("EXT", packet_recv->data, 3) == 0) {
         bytes_sent_or_error =
-            send_packet(sockfd, client, StringView_from_cstr("GDB"));
+            send_packet(sock_poll->fd, client, StringView_from_cstr("GDB"));
         if (bytes_sent_or_error < 0) {
             return bytes_sent_or_error;
         }
@@ -125,7 +228,7 @@ int handle_input(
     else if (strncmp("LST", packet_recv->data, 3) == 0) {
         for (size_t i = 0; i < filenames->len; i++) {
             int bytes_sent_or_error = send_sequenced_packet(
-                sockfd,
+                sock_poll->fd,
                 client,
                 "LSQ",
                 i + 1,
@@ -146,13 +249,20 @@ int handle_input(
     else if (strncmp("GFL", packet_recv->data, 3) == 0) {
         // TODO: handle sequenced packet and actaully send the right file
         String filename = String_from_cstr("smnt/files/basic.txt");
-        bytes_sent_or_error = send_file(sockfd, client, &filename);
+        bytes_sent_or_error = send_file(sock_poll->fd, client, &filename);
+        String_free(&filename);
+        return bytes_sent_or_error;
+    } else if (strncmp("PFL", packet_recv->data, 3) == 0) {
+        // TODO: handle sequenced packet and actaully send the right file
+        String filename = String_from_cstr("smnt/files/basic.txt");
+        bytes_sent_or_error = recieve_file(sock_poll, client, &filename);
+        String_free(&filename);
         return bytes_sent_or_error;
     }
     // unknown command, send error
     else {
         bytes_sent_or_error =
-            send_packet(sockfd, client, StringView_from_cstr("CER"));
+            send_packet(sock_poll->fd, client, StringView_from_cstr("ERR"));
         if (bytes_sent_or_error < 0) {
             return bytes_sent_or_error;
         }
@@ -175,7 +285,7 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
         memset(&client, 0, sizeof(client));
         client.addrlen = sizeof(client.addrlen);
 
-        int num_events = poll(pfds, 1, 2500);
+        int num_events = poll(pfds, 1, timeout_ms);
         if (num_events != 0) {
             if (pfds[0].revents & POLLIN) {
                 String packet_in;
@@ -185,7 +295,7 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
                         get_client(&cl, &client.addr, client.addrlen);
                     print_input(current_client, &packet_in);
                     if (handle_input(
-                            bs->fd,
+                            &pfds[0],
                             current_client,
                             &packet_in,
                             filenames

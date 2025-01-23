@@ -125,9 +125,6 @@ int recieve_file(
     String* filename_to_recv
 )
 {
-    char msg_buffer[UFTP_BUFFER_SIZE];
-    memset(msg_buffer, 0, sizeof(msg_buffer));
-
     uint32_t number_packets_to_recv = 0;
     uint32_t number_packets_recv = 0;
     StringVector file = StringVector_new();
@@ -164,7 +161,7 @@ int recieve_file(
                         return ret;
                     }
                     number_packets_recv++;
-                    if (strncmp(header, "FGQ", UFTP_HEADER_SIZE) != 0) {
+                    if (strncmp(header, "FLQ", UFTP_HEADER_SIZE) != 0) {
                         // not a critical error
                         fprintf(
                             stderr,
@@ -311,7 +308,7 @@ int main(int argc, char** argv)
                             int bs_or_err = send_sequenced_packet(
                                 bs.fd,
                                 &server_address,
-                                "GFL",
+                                "FLQ",
                                 1,
                                 1,
                                 StringView_create(&filename, 0, filename.len)
@@ -331,6 +328,53 @@ int main(int argc, char** argv)
                                 String_free(&cmd);
                                 return bs_or_err;
                             }
+                        } else {
+                            printf("-uftp_client: ");
+                            printf(": usage is 'get <filename>'\n");
+                        }
+                        StringVector_free(&get_args);
+                    } else if (String_cmpn_cstr(&cmd, "put", 3) == 0) {
+                        StringVector get_args =
+                            StringVector_from_split(&cmd, ' ');
+                        if (get_args.len >= 2) {
+                            /*
+                            String filename = String_create(
+                                StringVector_get(&get_args, 1)->data,
+                                StringVector_get(&get_args, 1)->len
+                            );
+                            */
+                            String filename =
+                                String_from_cstr("smnt/files/basic.txt");
+                            int bs_or_err = send_sequenced_packet(
+                                bs.fd,
+                                &server_address,
+                                "PFL",
+                                1,
+                                1,
+                                StringView_create(&filename, 0, filename.len)
+                            );
+                            if (bs_or_err < 0) {
+                                String_free(&filename);
+                                String_free(&cmd);
+                                return -bs_or_err;
+                            }
+                            String contents = String_from_file(&filename);
+                            bs_or_err = send_sequenced_packet(
+                                bs.fd,
+                                &server_address,
+                                "FLQ",
+                                1,
+                                1,
+                                StringView_create(&contents, 0, contents.len)
+                            );
+                            if (bs_or_err < 0) {
+                                String_free(&contents);
+                                String_free(&filename);
+                                String_free(&cmd);
+                                return bs_or_err;
+                            }
+                            String_free(&contents);
+                            String_free(&filename);
                         } else {
                             printf("-uftp_client: ");
                             printf(": usage is 'get <filename>'\n");
