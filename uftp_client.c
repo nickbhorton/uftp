@@ -204,6 +204,7 @@ int recieve_file(
     return 0;
 }
 
+// TODO: handle dealocations on error
 int main(int argc, char** argv)
 {
     if (validate_address(argc, argv) < 0) {
@@ -308,7 +309,7 @@ int main(int argc, char** argv)
                             int bs_or_err = send_sequenced_packet(
                                 bs.fd,
                                 &server_address,
-                                "FLQ",
+                                "GFL",
                                 1,
                                 1,
                                 StringView_create(&filename, 0, filename.len)

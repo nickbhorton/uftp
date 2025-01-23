@@ -147,6 +147,7 @@ int recieve_file(
                         &seq_total,
                         &payload
                     );
+                    String_dbprint_hex(&packet);
                     String_free(&packet);
                     if (ret < 0) {
                         err = true;
@@ -254,7 +255,7 @@ int handle_input(
         return bytes_sent_or_error;
     } else if (strncmp("PFL", packet_recv->data, 3) == 0) {
         // TODO: handle sequenced packet and actaully send the right file
-        String filename = String_from_cstr("smnt/files/basic.txt");
+        String filename = String_from_cstr("test.server");
         bytes_sent_or_error = recieve_file(sock_poll, client, &filename);
         String_free(&filename);
         return bytes_sent_or_error;
