@@ -105,7 +105,8 @@ int send_file(
     // relative paths or absolute paths into potenetially sensitive data.
     bool valid = false;
     for (size_t i = 0; i < valid_filenames->len; i++) {
-        if (String_cmp(&valid_filenames->data[i], filename) == 0) {
+        int cmp_val = String_cmp(&valid_filenames->data[i], filename);
+        if (cmp_val == 0) {
             valid = true;
         }
     }
@@ -115,7 +116,11 @@ int send_file(
         return bytes_sent_or_error;
     }
 
+    String_print(filename, false);
+    printf(" is valid filename\n");
+
     String contents = String_from_file(filename);
+    printf("file size %zu\n", contents.len);
     // its also possible that the file does not exist
     if (contents.len == 0) {
         int bytes_sent_or_error =

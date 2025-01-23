@@ -144,6 +144,12 @@ int recieve_file(
                     StringVector_free(&file);
                     return bytes_recv;
                 } else {
+                    if (strncmp(packet.data, "ERR", UFTP_HEADER_SIZE) == 0) {
+                        String_free(&packet);
+                        // probably indicates no file on server
+                        StringVector_free(&file);
+                        return 1;
+                    }
                     char header[UFTP_HEADER_SIZE];
                     uint32_t seq_number;
                     uint32_t seq_total;
@@ -326,11 +332,16 @@ int main(int argc, char** argv)
                                 &server_address,
                                 &filename
                             );
-                            String_free(&filename);
                             if (bs_or_err < 0) {
+                                String_free(&filename);
                                 String_free(&cmd);
                                 return bs_or_err;
+                            } else if (bs_or_err == 1) {
+                                printf("uftp_client: ");
+                                String_print(&filename, false);
+                                printf(": No such file\n");
                             }
+                            String_free(&filename);
                         } else {
                             printf("-uftp_client: ");
                             printf(": usage is 'get <filename>'\n");
