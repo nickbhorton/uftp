@@ -1,6 +1,5 @@
 #include "uftp_server.h"
 #include <assert.h>
-#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,7 +22,7 @@ int validate_port(int argc, char** argv);
 
 int server_loop(UdpBoundSocket* bs, StringVector* filenames);
 
-void print_input(Address* client, char* msg, int bytes_recv);
+void print_input(Address* client, String* packet);
 
 int handle_input(
     int sockfd,
@@ -38,11 +37,10 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    String if_name = String_from_cstr("smnt/filenames.txt");
-    String if_content = String_from_file(&if_name);
-    StringVector filenames = StringVector_from_split(&if_content, '\n');
-    String_free(&if_name);
-    String_free(&if_content);
+    String ls_output;
+    get_shell_cmd_cout("ls", &ls_output);
+    StringVector filenames = StringVector_from_split(&ls_output, '\n');
+    String_free(&ls_output);
 
     UdpBoundSocket bs;
     if ((bs = get_udp_socket(NULL, argv[1])).fd < 0) {
@@ -95,12 +93,14 @@ int send_n_packet(
 int send_file(int sockfd, Address* client, String* filename)
 {
     String contents = String_from_file(filename);
-    int bytes_sent_or_error = send_s_packet(sockfd, client, 1, "FGS");
-    if (bytes_sent_or_error < 0) {
-        String_free(&contents);
-        return bytes_sent_or_error;
-    }
-    bytes_sent_or_error = send_n_packet(sockfd, client, &contents, 1, "FGN");
+    int bytes_sent_or_error = send_sequenced_packet(
+        sockfd,
+        client,
+        "FGQ",
+        1,
+        1,
+        StringView_create(&contents, 0, contents.len)
+    );
     String_free(&contents);
     return bytes_sent_or_error;
 }
@@ -123,18 +123,18 @@ int handle_input(
     }
     // ls
     else if (strncmp("LST", packet_recv->data, 3) == 0) {
-        bytes_sent_or_error =
-            send_s_packet(sockfd, client, filenames->len, "FLS");
-        if (bytes_sent_or_error < 0) {
-            return bytes_sent_or_error;
-        }
         for (size_t i = 0; i < filenames->len; i++) {
-            bytes_sent_or_error = send_n_packet(
+            int bytes_sent_or_error = send_sequenced_packet(
                 sockfd,
                 client,
-                &filenames->data[i],
+                "LSQ",
                 i + 1,
-                "FLN"
+                filenames->len,
+                StringView_create(
+                    &filenames->data[i],
+                    0,
+                    filenames->data[i].len
+                )
             );
             if (bytes_sent_or_error < 0) {
                 return bytes_sent_or_error;
@@ -144,11 +144,10 @@ int handle_input(
     }
     // get 'filename'
     else if (strncmp("GFL", packet_recv->data, 3) == 0) {
+        // TODO: handle sequenced packet and actaully send the right file
         String filename = String_from_cstr("smnt/files/basic.txt");
         bytes_sent_or_error = send_file(sockfd, client, &filename);
-        if (bytes_sent_or_error < 0) {
-            return bytes_sent_or_error;
-        }
+        return bytes_sent_or_error;
     }
     // unknown command, send error
     else {
@@ -170,9 +169,6 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
     client_list_t cl;
     client_list_init(&cl);
 
-    char buffer[256];
-    memset(buffer, 0, sizeof(buffer));
-
     Address client;
     int bytes_recv;
     while (1) {
@@ -182,38 +178,24 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
         int num_events = poll(pfds, 1, 2500);
         if (num_events != 0) {
             if (pfds[0].revents & POLLIN) {
-                bytes_recv = recvfrom(
-                    pfds[0].fd,
-                    buffer,
-                    sizeof(buffer),
-                    0,
-                    Address_sockaddr(&client),
-                    &client.addrlen
-                );
-
+                String packet_in;
+                bytes_recv = recv_packet(pfds[0].fd, &client, &packet_in);
                 if (bytes_recv >= 0) {
                     Address* current_client =
                         get_client(&cl, &client.addr, client.addrlen);
-                    print_input(current_client, buffer, bytes_recv);
-                    String packet_recv = String_create(buffer, bytes_recv);
+                    print_input(current_client, &packet_in);
                     if (handle_input(
                             bs->fd,
                             current_client,
-                            &packet_recv,
+                            &packet_in,
                             filenames
                         ) < 0) {
+                        String_free(&packet_in);
                         client_list_free(&cl);
                         return -1;
                     }
-                    String_free(&packet_recv);
-                    memset(buffer, 0, bytes_recv);
+                    String_free(&packet_in);
                 } else {
-                    int recvfrom_err = errno;
-                    fprintf(
-                        stderr,
-                        "recvfrom() error: %s\n",
-                        strerror(recvfrom_err)
-                    );
                     client_list_free(&cl);
                     return -1;
                 }
@@ -226,22 +208,19 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
     return 0;
 }
 
-void print_input(Address* client, char* msg, int bytes_recv)
+void print_input(Address* client, String* packet)
 {
-    char client_addr_str[INET6_ADDRSTRLEN];
-    memset(&client_addr_str, 0, sizeof(client_addr_str));
-    printf(
-        "%s:%u(%i): %s\n",
-        inet_ntop(
-            client->addr.ss_family,
-            Address_in_addr(client),
-            client_addr_str,
-            sizeof(client_addr_str)
-        ),
-        Address_port(client),
-        bytes_recv,
-        msg
+    char client_str_buffer[INET6_ADDRSTRLEN];
+    memset(&client_str_buffer, 0, sizeof(client_str_buffer));
+    uint16_t portnum = Address_port(client);
+    const char* client_address_string = inet_ntop(
+        client->addr.ss_family,
+        Address_in_addr(client),
+        client_str_buffer,
+        sizeof(client_str_buffer)
     );
+    printf("%s:%u(%zu)\n", client_address_string, portnum, packet->len);
+    String_dbprint_hex(packet);
 }
 
 int validate_port(int argc, char** argv)

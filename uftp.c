@@ -1,4 +1,5 @@
 #include "uftp.h"
+#include "String.h"
 #include <stdint.h>
 
 UdpBoundSocket get_udp_socket(const char* addr, const char* port)
@@ -160,6 +161,7 @@ int recv_packet(int sockfd, Address* from, String* packet_o)
         memset(buffer, 0, UFTP_BUFFER_SIZE);
         buff_init = true;
     }
+    from->addrlen = sizeof(from->addr);
     int bytes_recv = recvfrom(
         sockfd,
         buffer,
@@ -241,4 +243,22 @@ int parse_sequenced_packet(
         payload_len
     );
     return 0;
+}
+
+int get_shell_cmd_cout(const char* cmd, String* cout_o)
+{
+    FILE* fptr;
+    fptr = popen(cmd, "r");
+    if (fptr == NULL) {
+        fprintf(stderr, "get_shell_cmd_cout() error: popen() failed\n");
+        return -1;
+    }
+
+    int c = 0;
+    size_t char_count = 0;
+    while ((c = fgetc(fptr)) != EOF) {
+        String_push_back(cout_o, (char)c);
+        char_count++;
+    }
+    return char_count;
 }

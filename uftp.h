@@ -21,8 +21,13 @@ typedef struct {
 } Address;
 
 struct sockaddr* Address_sockaddr(Address* a);
-void* Address_in_addr(Address* a);
 uint16_t Address_port(Address* a);
+
+/*
+ * from beej returns a pointer to either a addr_sin or addr_sin6 dependand on
+ * addr.ss_family
+ */
+void* Address_in_addr(Address* a);
 
 typedef struct {
     int fd;
@@ -60,5 +65,11 @@ int parse_sequenced_packet(
     uint32_t* seq_total_o,
     String* payload_o
 );
+
+/*
+ * Potentailly very harmfull command, should not be used based on any user
+ * input, the cmd parameter should be directly filled with a c string constant.
+ */
+int get_shell_cmd_cout(const char* cmd, String* cout_o);
 
 #endif

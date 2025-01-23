@@ -14,75 +14,36 @@
 #include "StringVector.h"
 #include "uftp.h"
 
-#define BUFFER_LENGTH 256
-
 #define DEBUG 0
+
+static int timeout_ms = 1000;
 
 void useage();
 
 int validate_address(int argc, char** argv);
 
-int send_cmd(int sockfd, Address* server_address, String* cmd)
-{
-    int bytes_sent_or_error;
-    if ((bytes_sent_or_error = sendto(
-             sockfd,
-             cmd->data,
-             cmd->len,
-             0,
-             Address_sockaddr(server_address),
-             server_address->addrlen
-         )) < 0) {
-        int sendto_err = errno;
-        fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
-        return -1;
-    } else if (bytes_sent_or_error != cmd->len) {
-        fprintf(
-            stderr,
-            "send_packet() error: %s\n",
-            "bytes sent were less than packet length"
-        );
-        return -2;
-    }
-    return bytes_sent_or_error;
-}
 int handle_exit_response(struct pollfd* server_pollfd, Address* server_address)
 {
-    char msg_buffer[BUFFER_LENGTH];
-    memset(msg_buffer, 0, sizeof(msg_buffer));
-
     while (1) {
-        int num_events = poll(server_pollfd, 1, 1000);
+        int num_events = poll(server_pollfd, 1, timeout_ms);
         if (num_events != 0 && server_pollfd[0].revents & POLLIN) {
-            int bytes_recv = recvfrom(
-                server_pollfd[0].fd,
-                msg_buffer,
-                sizeof(msg_buffer),
-                0,
-                Address_sockaddr(server_address),
-                &server_address->addrlen
-            );
-            if (bytes_recv > 0) {
-                String packet = String_create(msg_buffer, bytes_recv);
-                String head = String_create(msg_buffer, 3);
-                if (String_cmp_cstr(&head, "GDB") == 0) {
+            String packet;
+            int bytes_recv =
+                recv_packet(server_pollfd[0].fd, server_address, &packet);
+            if (bytes_recv < 0) {
+                String_free(&packet);
+                return bytes_recv;
+            } else {
+                if (String_cmp_cstr(&packet, "GDB") == 0) {
                     printf("server says goodbye!\n");
-                    String_free(&packet);
-                    String_free(&head);
-                    return 0;
                 } else {
                     fprintf(
                         stderr,
                         "handle_exit_response, strange packet found\n"
                     );
-                    String_print(&head, true);
-                    String_dbprint_hex(&packet);
                 }
                 String_free(&packet);
-                String_free(&head);
-            } else {
-                fprintf(stderr, "handle_exit_response recvfrom error\n");
-                return -1;
+                return 0;
             }
         } else {
             fprintf(stderr, "timed out\n");
@@ -92,11 +53,9 @@ int handle_exit_response(struct pollfd* server_pollfd, Address* server_address)
     return 0;
 }
 
+// TODO: request packets again if they are dropped
 int handle_ls_response(struct pollfd* server_pollfd, Address* server_address)
 {
-    char msg_buffer[BUFFER_LENGTH];
-    memset(msg_buffer, 0, sizeof(msg_buffer));
-
     uint32_t number_filenames_to_recv = 0;
     uint32_t number_filenames_recv = 0;
 
@@ -105,63 +64,50 @@ int handle_ls_response(struct pollfd* server_pollfd, Address* server_address)
             number_filenames_to_recv != 0) {
             return 0;
         }
-        int num_events = poll(server_pollfd, 1, 2500);
+        int num_events = poll(server_pollfd, 1, timeout_ms);
         if (num_events != 0) {
             if (server_pollfd[0].revents & POLLIN) {
-                int bytes_recv = recvfrom(
-                    server_pollfd[0].fd,
-                    msg_buffer,
-                    sizeof(msg_buffer),
-                    0,
-                    Address_sockaddr(server_address),
-                    &server_address->addrlen
-                );
-                if (bytes_recv > 0) {
-                    String packet = String_create(msg_buffer, bytes_recv);
-                    String head = String_create(msg_buffer, 3);
-                    if (String_cmp_cstr(&head, "FLS") == 0 && packet.len == 7) {
-                        number_filenames_to_recv =
-                            ntohl(String_parse_u32(&packet, 3));
-                        if (DEBUG) {
-                            printf(
-                                "to recv %u filenames\n",
-                                number_filenames_to_recv
-                            );
-                        }
-                    } else if (String_cmp_cstr(&head, "FLN") == 0 &&
-                               packet.len >= 11) {
-                        uint32_t packet_length =
-                            ntohl(String_parse_u32(&packet, 3));
-                        if (packet.len != packet_length) {
-                            fprintf(
-                                stderr,
-                                "FLN packet was the wrong size, %u, %zu\n",
-                                packet_length,
-                                packet.len
-                            );
-                        }
-                        uint32_t packet_seq =
-                            ntohl(String_parse_u32(&packet, 7));
-                        String filename =
-                            String_create(packet.data + 11, packet.len - 11);
-                        String_print(&filename, false);
-                        if (DEBUG) {
-                            printf(" %u\n", packet_seq);
-                        } else {
-                            printf("\n");
-                        }
-                        String_free(&filename);
-                        number_filenames_recv++;
-                    } else {
+                String packet;
+                int bytes_recv =
+                    recv_packet(server_pollfd[0].fd, server_address, &packet);
+                if (bytes_recv < 0) {
+                    String_free(&packet);
+                    return bytes_recv;
+                } else {
+                    char header[UFTP_HEADER_SIZE];
+                    uint32_t seq_number;
+                    uint32_t seq_total;
+                    String payload;
+                    int ret = parse_sequenced_packet(
+                        &packet,
+                        header,
+                        &seq_number,
+                        &seq_total,
+                        &payload
+                    );
+                    String_free(&packet);
+                    if (ret < 0) {
+                        return ret;
+                    }
+                    number_filenames_recv++;
+                    if (strncmp(header, "LSQ", UFTP_HEADER_SIZE) != 0) {
+                        // not a critical error
                         fprintf(
                             stderr,
-                            "handle_ls_response, strange packet found\n"
+                            "sequenced packet header for ls was not correct\n"
                         );
-                        String_print(&head, true);
-                        String_dbprint_hex(&packet);
                     }
-                    String_free(&packet);
-                    String_free(&head);
+                    if (number_filenames_to_recv == 0) {
+                        number_filenames_to_recv = seq_total;
+                    } else if (seq_total != number_filenames_to_recv) {
+                        // not a critical error
+                        fprintf(
+                            stderr,
+                            "sequenced packet seq_total did not match\n"
+                        );
+                    }
+                    String_print(&payload, true);
+                    String_free(&payload);
                 }
             }
         } else {
@@ -172,13 +118,14 @@ int handle_ls_response(struct pollfd* server_pollfd, Address* server_address)
     return 0;
 }
 
+// TODO: request dropped packets
 int recieve_file(
     struct pollfd* sock_poll,
     Address* address,
     String* filename_to_recv
 )
 {
-    char msg_buffer[BUFFER_LENGTH];
+    char msg_buffer[UFTP_BUFFER_SIZE];
     memset(msg_buffer, 0, sizeof(msg_buffer));
 
     uint32_t number_packets_to_recv = 0;
@@ -190,59 +137,53 @@ int recieve_file(
             number_packets_to_recv != 0) {
             break;
         }
-        int num_events = poll(sock_poll, 1, 2500);
-
+        int num_events = poll(sock_poll, 1, timeout_ms);
         if (num_events != 0) {
             if (sock_poll[0].revents & POLLIN) {
-                int bytes_recv = recvfrom(
-                    sock_poll[0].fd,
-                    msg_buffer,
-                    sizeof(msg_buffer),
-                    0,
-                    Address_sockaddr(address),
-                    &address->addrlen
-                );
-                if (bytes_recv > 0) {
-                    String packet = String_create(msg_buffer, bytes_recv);
-                    String head = String_create(msg_buffer, 3);
-                    if (String_cmp_cstr(&head, "FGS") == 0 && packet.len == 7) {
-                        number_packets_to_recv =
-                            ntohl(String_parse_u32(&packet, 3));
-                        if (DEBUG) {
-                            printf("to recv %u\n", number_packets_to_recv);
-                        }
-                    } else if (String_cmp_cstr(&head, "FGN") == 0 &&
-                               packet.len >= 11) {
-                        uint32_t packet_length =
-                            ntohl(String_parse_u32(&packet, 3));
-                        if (packet.len != packet_length) {
-                            fprintf(
-                                stderr,
-                                "FLN packet was the wrong size, %u, %zu\n",
-                                packet_length,
-                                packet.len
-                            );
-                        }
-                        uint32_t packet_seq =
-                            ntohl(String_parse_u32(&packet, 7));
-                        StringVector_push_back_move(
-                            &file,
-                            String_create(packet.data + 7, packet.len - 7)
-                        );
-                        if (DEBUG) {
-                            printf(" %u\n", packet_seq);
-                        }
-                        number_packets_recv++;
-                    } else {
+                String packet;
+                int bytes_recv = recv_packet(sock_poll[0].fd, address, &packet);
+                if (bytes_recv < 0) {
+                    String_free(&packet);
+                    StringVector_free(&file);
+                    return bytes_recv;
+                } else {
+                    char header[UFTP_HEADER_SIZE];
+                    uint32_t seq_number;
+                    uint32_t seq_total;
+                    String payload;
+                    int ret = parse_sequenced_packet(
+                        &packet,
+                        header,
+                        &seq_number,
+                        &seq_total,
+                        &payload
+                    );
+                    String_free(&packet);
+                    if (ret < 0) {
+                        StringVector_free(&file);
+                        return ret;
+                    }
+                    number_packets_recv++;
+                    if (strncmp(header, "FGQ", UFTP_HEADER_SIZE) != 0) {
+                        // not a critical error
                         fprintf(
                             stderr,
-                            "when recieving N/S packets, strange packet found\n"
+                            "sequenced packet header for get was not correct\n"
                         );
-                        String_print(&head, true);
-                        String_dbprint_hex(&packet);
                     }
-                    String_free(&packet);
-                    String_free(&head);
+                    if (number_packets_to_recv == 0) {
+                        number_packets_to_recv = seq_total;
+                    } else if (seq_total != number_packets_to_recv) {
+                        // not a critical error
+                        fprintf(
+                            stderr,
+                            "sequenced packet seq_total did not match\n"
+                        );
+                    }
+                    if (DEBUG) {
+                        String_print(&payload, true);
+                    }
+                    StringVector_push_back_move(&file, payload);
                 }
             }
         } else {
@@ -253,8 +194,8 @@ int recieve_file(
     String file_content = String_new();
     for (size_t i = 0; i < file.len; i++) {
         String content = String_create(
-            StringVector_get(&file, i)->data + 4,
-            StringVector_get(&file, i)->len - 4
+            StringVector_get(&file, i)->data,
+            StringVector_get(&file, i)->len
         );
         String_push_move(&file_content, content);
     }
@@ -307,11 +248,10 @@ int main(int argc, char** argv)
     pfds[1].fd = bs.fd;
     pfds[1].events = POLLIN;
 
-    char msg_buffer[BUFFER_LENGTH];
+    char msg_buffer[UFTP_BUFFER_SIZE];
     memset(msg_buffer, 0, sizeof(msg_buffer));
 
-    struct sockaddr_storage server_addr;
-    socklen_t server_addr_len;
+    Address server;
     int bytes_recv;
     bool timed_out = false;
     while (1) {
@@ -319,10 +259,7 @@ int main(int argc, char** argv)
             printf("> ");
             fflush(stdout);
         }
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr_len = sizeof(server_addr);
-
-        int num_events = poll(pfds, 2, 2500);
+        int num_events = poll(pfds, 2, timeout_ms);
         if (num_events != 0) {
             timed_out = false;
             if (pfds[0].revents & POLLIN) {
@@ -331,14 +268,15 @@ int main(int argc, char** argv)
                     // -1 to remove the \n for line buffered terminal?
                     String cmd = String_create(msg_buffer, bytes_recv - 1);
                     if (String_cmp_cstr(&cmd, "ls") == 0) {
-                        String ls_command = String_from_cstr("LST");
-                        int bs_or_err =
-                            send_cmd(bs.fd, &server_address, &ls_command);
+                        int bs_or_err = send_packet(
+                            bs.fd,
+                            &server_address,
+                            StringView_from_cstr("LST")
+                        );
                         if (bs_or_err < 0) {
-                            String_free(&ls_command);
-                            return bs_or_err;
+                            String_free(&cmd);
+                            return -bs_or_err;
                         }
-                        String_free(&ls_command);
                         bs_or_err =
                             handle_ls_response(&pfds[1], &server_address);
                         if (bs_or_err < 0) {
@@ -346,14 +284,14 @@ int main(int argc, char** argv)
                             return bs_or_err;
                         }
                     } else if (String_cmp_cstr(&cmd, "exit") == 0) {
-                        String ext_command = String_from_cstr("EXT");
-                        int bs_or_err =
-                            send_cmd(bs.fd, &server_address, &ext_command);
+                        int bs_or_err = send_packet(
+                            bs.fd,
+                            &server_address,
+                            StringView_from_cstr("EXT")
+                        );
                         if (bs_or_err < 0) {
-                            String_free(&ext_command);
                             return -bs_or_err;
                         }
-                        String_free(&ext_command);
                         bs_or_err =
                             handle_exit_response(&pfds[1], &server_address);
                         if (bs_or_err < 0) {
@@ -363,28 +301,26 @@ int main(int argc, char** argv)
                         // exit from while loop
                         break;
                     } else if (String_cmpn_cstr(&cmd, "get", 3) == 0) {
-                        StringVector sv = StringVector_from_split(&cmd, ' ');
-                        if (sv.len >= 2) {
+                        StringVector get_args =
+                            StringVector_from_split(&cmd, ' ');
+                        if (get_args.len >= 2) {
                             String filename = String_create(
-                                StringVector_get(&sv, 1)->data,
-                                StringVector_get(&sv, 1)->len
+                                StringVector_get(&get_args, 1)->data,
+                                StringVector_get(&get_args, 1)->len
                             );
-                            String get_command = String_from_cstr("GFL");
-                            String_push_u32(
-                                &get_command,
-                                htonl(3 + sizeof(uint32_t) + filename.len)
+                            int bs_or_err = send_sequenced_packet(
+                                bs.fd,
+                                &server_address,
+                                "GFL",
+                                1,
+                                1,
+                                StringView_create(&filename, 0, filename.len)
                             );
-                            String_push_copy(&get_command, &filename);
-
-                            int bs_or_err =
-                                send_cmd(bs.fd, &server_address, &get_command);
                             if (bs_or_err < 0) {
                                 String_free(&filename);
-                                String_free(&get_command);
+                                String_free(&cmd);
                                 return -bs_or_err;
                             }
-
-                            String_free(&get_command);
                             bs_or_err = recieve_file(
                                 &pfds[1],
                                 &server_address,
@@ -399,7 +335,7 @@ int main(int argc, char** argv)
                             printf("-uftp_client: ");
                             printf(": usage is 'get <filename>'\n");
                         }
-                        StringVector_free(&sv);
+                        StringVector_free(&get_args);
                     } else {
                         printf("-uftp_client: ");
                         String_print(&cmd, false);
@@ -413,21 +349,14 @@ int main(int argc, char** argv)
                     return 1;
                 }
             } else if (pfds[1].revents & POLLIN) {
-                bytes_recv = recvfrom(
-                    pfds[1].fd,
-                    msg_buffer,
-                    sizeof(msg_buffer),
-                    0,
-                    (struct sockaddr*)&server_addr,
-                    &server_addr_len
-                );
+                String packet;
+                bytes_recv = recv_packet(pfds[1].fd, &server, &packet);
                 if (bytes_recv > 0) {
-                    String packet = String_create(msg_buffer, bytes_recv);
-                    String head = String_create(packet.data, 3);
-                    String_print(&head, true);
                     String_dbprint_hex(&packet);
                     String_free(&packet);
-                    String_free(&head);
+                } else {
+                    String_free(&packet);
+                    return 1;
                 }
             }
         } else {

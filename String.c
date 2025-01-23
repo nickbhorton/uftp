@@ -1,4 +1,5 @@
 #include "String.h"
+#include <ctype.h>
 
 #define INIT_MALLOC 64
 
@@ -186,10 +187,31 @@ void String_dbprint_hex(String* s)
         print_nibble_hex(lower);
         printf(" ");
         if (i % bytes_per_line == bytes_per_line - 1) {
-            printf("\n");
+            printf(" |");
+            for (size_t j = 0; j < bytes_per_line; j++) {
+                char top = String_get(s, i - bytes_per_line + 1 + j);
+                if (isalnum(top)) {
+                    printf("%c ", top);
+                } else {
+                    printf(". ");
+                }
+            }
+            printf("|\n");
         }
     }
-    printf("\n");
+    for (size_t j = 0; j < bytes_per_line - (s->len % bytes_per_line); j++) {
+        printf("   ");
+    }
+    printf(" |");
+    for (size_t j = 0; j < s->len % bytes_per_line; j++) {
+        char top = String_get(s, s->len - (s->len % bytes_per_line) + j);
+        if (isalnum(top)) {
+            printf("%c ", top);
+        } else {
+            printf(". ");
+        }
+    }
+    printf("|\n");
 }
 
 void String_print(String* s, bool with_newline)
@@ -295,7 +317,7 @@ int16_t String_parse_i16(const String* s, size_t loc)
 
 StringView StringView_create(const String* s, size_t start_inc, size_t end_ninc)
 {
-    if (start_inc + end_ninc >= s->len || start_inc >= s->len) {
+    if (start_inc + end_ninc > s->len || start_inc >= s->len) {
         fprintf(stderr, "StringView is going to overrun String data buffer\n");
     }
     if (((int)end_ninc) - ((int)start_inc) < 0) {
