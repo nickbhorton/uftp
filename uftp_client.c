@@ -144,7 +144,7 @@ int recieve_file(
                     StringVector_free(&file);
                     return bytes_recv;
                 } else {
-                    if (strncmp(packet.data, "ERR", UFTP_HEADER_SIZE) == 0) {
+                    if (strncmp(packet.data, "FNO", UFTP_HEADER_SIZE) == 0) {
                         String_free(&packet);
                         // probably indicates no file on server
                         StringVector_free(&file);

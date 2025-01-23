@@ -111,6 +111,8 @@ int send_file(
         }
     }
     if (!valid) {
+        String_print(filename, false);
+        printf(" is not a valid filename\n");
         int bytes_sent_or_error =
             send_packet(sockfd, client, StringView_from_cstr("FNO"));
         return bytes_sent_or_error;
