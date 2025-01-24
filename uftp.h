@@ -12,8 +12,14 @@
 
 #include "String.h"
 
+#define UFTP_DEBUG 1
+
 #define UFTP_HEADER_SIZE 3
-#define UFTP_BUFFER_SIZE 128
+#define UFTP_BUFFER_SIZE 1024
+
+#define UFTP_TIMEOUT_MS 1000
+
+#define UFTP_SEQ_PROTOCOL_SIZE (3 + 3 * sizeof(uint32_t))
 
 typedef struct {
     struct sockaddr_storage addr;
@@ -37,7 +43,7 @@ typedef struct {
 UdpBoundSocket get_udp_socket(const char* addr, const char* port);
 
 int send_packet(int sockfd, Address* to, StringView packet);
-int recv_packet(int sockfd, Address* from, String* packet_o);
+int recv_packet(int sockfd, Address* from, String* packet_o, bool append);
 
 /*
  * Protocol:

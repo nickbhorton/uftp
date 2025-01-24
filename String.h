@@ -51,6 +51,12 @@ void String_dbprint_hex(String* s);
 
 // Read entire file into a String
 String String_from_file(String* filename);
+// Read file chunked into string
+String String_from_file_chunked(
+    String* filename,
+    size_t chunk_size,
+    size_t chunk_index
+);
 // Write entire String to file
 void String_to_file(String* s, String* filename);
 

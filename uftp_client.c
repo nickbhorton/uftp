@@ -14,10 +14,6 @@
 #include "StringVector.h"
 #include "uftp.h"
 
-#define DEBUG 0
-
-static int timeout_ms = 1000;
-
 void useage();
 
 int validate_address(int argc, char** argv);
@@ -25,11 +21,15 @@ int validate_address(int argc, char** argv);
 int handle_exit_response(struct pollfd* server_pollfd, Address* server_address)
 {
     while (1) {
-        int num_events = poll(server_pollfd, 1, timeout_ms);
+        int num_events = poll(server_pollfd, 1, UFTP_TIMEOUT_MS);
         if (num_events != 0 && server_pollfd[0].revents & POLLIN) {
             String packet;
-            int bytes_recv =
-                recv_packet(server_pollfd[0].fd, server_address, &packet);
+            int bytes_recv = recv_packet(
+                server_pollfd[0].fd,
+                server_address,
+                &packet,
+                false
+            );
             if (bytes_recv < 0) {
                 String_free(&packet);
                 return bytes_recv;
@@ -64,12 +64,16 @@ int handle_ls_response(struct pollfd* server_pollfd, Address* server_address)
             number_filenames_to_recv != 0) {
             return 0;
         }
-        int num_events = poll(server_pollfd, 1, timeout_ms);
+        int num_events = poll(server_pollfd, 1, UFTP_TIMEOUT_MS);
         if (num_events != 0) {
             if (server_pollfd[0].revents & POLLIN) {
                 String packet;
-                int bytes_recv =
-                    recv_packet(server_pollfd[0].fd, server_address, &packet);
+                int bytes_recv = recv_packet(
+                    server_pollfd[0].fd,
+                    server_address,
+                    &packet,
+                    false
+                );
                 if (bytes_recv < 0) {
                     String_free(&packet);
                     return bytes_recv;
@@ -128,17 +132,19 @@ int recieve_file(
     uint32_t number_packets_to_recv = 0;
     uint32_t number_packets_recv = 0;
     StringVector file = StringVector_new();
+    uint32_t total_payload_size = 0;
 
     while (1) {
         if (number_packets_recv == number_packets_to_recv &&
             number_packets_to_recv != 0) {
             break;
         }
-        int num_events = poll(sock_poll, 1, timeout_ms);
+        int num_events = poll(sock_poll, 1, UFTP_TIMEOUT_MS);
         if (num_events != 0) {
             if (sock_poll[0].revents & POLLIN) {
                 String packet;
-                int bytes_recv = recv_packet(sock_poll[0].fd, address, &packet);
+                int bytes_recv =
+                    recv_packet(sock_poll[0].fd, address, &packet, false);
                 if (bytes_recv < 0) {
                     String_free(&packet);
                     StringVector_free(&file);
@@ -154,7 +160,7 @@ int recieve_file(
                     uint32_t seq_number;
                     uint32_t seq_total;
                     String payload;
-                    int ret = parse_sequenced_packet(
+                    int rv = parse_sequenced_packet(
                         &packet,
                         header,
                         &seq_number,
@@ -162,9 +168,9 @@ int recieve_file(
                         &payload
                     );
                     String_free(&packet);
-                    if (ret < 0) {
+                    if (rv < 0) {
                         StringVector_free(&file);
-                        return ret;
+                        return rv;
                     }
                     number_packets_recv++;
                     if (strncmp(header, "FLQ", UFTP_HEADER_SIZE) != 0) {
@@ -183,9 +189,7 @@ int recieve_file(
                             "sequenced packet seq_total did not match\n"
                         );
                     }
-                    if (DEBUG) {
-                        String_print(&payload, true);
-                    }
+                    total_payload_size += bytes_recv - UFTP_SEQ_PROTOCOL_SIZE;
                     StringVector_push_back_move(&file, payload);
                 }
             }
@@ -195,6 +199,13 @@ int recieve_file(
         }
     }
     String file_content = String_new();
+    if (UFTP_DEBUG) {
+        printf("file vector size %zu\n", file.len);
+        printf(
+            "average payload size %f\n",
+            ((float)total_payload_size) / ((float)file.len)
+        );
+    }
     for (size_t i = 0; i < file.len; i++) {
         String content = String_create(
             StringVector_get(&file, i)->data,
@@ -203,6 +214,9 @@ int recieve_file(
         String_push_move(&file_content, content);
     }
     StringVector_free(&file);
+    if (UFTP_DEBUG) {
+        printf("file size %zu\n", file_content.len);
+    }
 
     // to file
     String_to_file(&file_content, filename_to_recv);
@@ -264,7 +278,7 @@ int main(int argc, char** argv)
             printf("> ");
             fflush(stdout);
         }
-        int event_count = poll(pfds, 2, timeout_ms);
+        int event_count = poll(pfds, 2, UFTP_TIMEOUT_MS);
         if (event_count == 0) {
             timed_out = true;
             continue;
@@ -408,7 +422,7 @@ int main(int argc, char** argv)
             }
         } else if (pfds[1].revents & POLLIN) {
             String packet;
-            bc_or_err = recv_packet(pfds[1].fd, &server, &packet);
+            bc_or_err = recv_packet(pfds[1].fd, &server, &packet, false);
             if (bc_or_err > 0) {
                 String_dbprint_hex(&packet);
                 String_free(&packet);

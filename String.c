@@ -64,8 +64,10 @@ String String_new()
 
 void String_free(String* s)
 {
-    free(s->data);
-    s->data = NULL;
+    if (s->data != NULL) {
+        free(s->data);
+        s->data = NULL;
+    }
     s->cap = 0;
     s->len = 0;
 }
@@ -157,7 +159,7 @@ void String_push_move(String* to, String from)
 
 void String_dbprint(String* s)
 {
-    printf("length: %zu\n", s->len);
+    printf("length: %zu\t", s->len);
     printf("capacity: %zu\n", s->cap);
     for (size_t i = 0; i < s->len; i++) {
         printf("%c", String_get(s, i));
@@ -173,7 +175,7 @@ static void print_nibble_hex(size_t nibble)
 
 void String_dbprint_hex(String* s)
 {
-    printf("length: %zu\n", s->len);
+    printf("length: %zu\t", s->len);
     printf("capacity: %zu\n", s->cap);
     size_t bytes_per_line = 8;
     for (size_t i = 0; i < s->len; i++) {
@@ -237,7 +239,39 @@ String String_from_file(String* filename)
         return s;
     }
     free(filename_cstr);
-    while ((in = (char)fgetc(fptr)) != EOF) {
+    while ((in = fgetc(fptr)) != EOF) {
+        String_push_back(&s, (char)in);
+    }
+    fclose(fptr);
+    return s;
+}
+
+String String_from_file_chunked(
+    String* filename,
+    size_t chunk_size,
+    size_t chunk_index
+)
+{
+    char* filename_cstr = String_to_cstr(filename);
+    FILE* fptr;
+    // b is ignored on linux but for portability?
+    fptr = fopen(filename_cstr, "rb");
+    String s = String_new();
+    if (fptr == NULL) {
+        fprintf(stderr, "failed to open file %s\n", filename_cstr);
+        free(filename_cstr);
+        return s;
+    }
+
+    // goto the next chunk
+    fseek(fptr, chunk_size * chunk_index, SEEK_SET);
+    int in;
+    free(filename_cstr);
+    for (size_t i = 0; i < chunk_size; i++) {
+        in = fgetc(fptr);
+        if (in == EOF) {
+            break;
+        }
         String_push_back(&s, in);
     }
     fclose(fptr);

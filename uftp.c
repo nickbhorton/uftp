@@ -1,6 +1,7 @@
-#include "uftp.h"
-#include "String.h"
 #include <stdint.h>
+
+#include "String.h"
+#include "uftp.h"
 
 UdpBoundSocket get_udp_socket(const char* addr, const char* port)
 {
@@ -83,7 +84,14 @@ UdpBoundSocket get_udp_socket(const char* addr, const char* port)
         success_addr,
         sizeof(success_addr)
     );
-    fprintf(stdout, "bound to address %s\n", success_addr);
+    if (UFTP_DEBUG) {
+        fprintf(
+            stdout,
+            "bound to address %s:%u\n",
+            success_addr,
+            Address_port(&bound_sock.address)
+        );
+    }
 
     freeaddrinfo(address_info);
 
@@ -153,7 +161,7 @@ int send_packet(int sockfd, Address* to, StringView packet)
     return bytes_sent;
 }
 
-int recv_packet(int sockfd, Address* from, String* packet_o)
+int recv_packet(int sockfd, Address* from, String* packet_o, bool append)
 {
     static bool buff_init = false;
     static char buffer[UFTP_BUFFER_SIZE];
@@ -162,24 +170,50 @@ int recv_packet(int sockfd, Address* from, String* packet_o)
         buff_init = true;
     }
     from->addrlen = sizeof(from->addr);
-    int bytes_recv = recvfrom(
+    int rv = recvfrom(
         sockfd,
         buffer,
-        sizeof(buffer),
+        UFTP_BUFFER_SIZE,
         0,
         (struct sockaddr*)&from->addr,
         &from->addrlen
     );
 
-    if (bytes_recv >= 0) {
-        *packet_o = String_create(buffer, bytes_recv);
-        memset(buffer, 0, bytes_recv);
-        return bytes_recv;
-    } else {
+    if (rv < 0) {
         int recvfrom_err = errno;
-        fprintf(stderr, "recv_packet() error: %s\n", strerror(recvfrom_err));
+        fprintf(
+            stderr,
+            "recv_packet::recvfrom() error: %s\n",
+            strerror(recvfrom_err)
+        );
         return -1;
     }
+
+    if (append) {
+        for (size_t i = 0; i < rv; i++) {
+            String_push_back(packet_o, buffer[i]);
+        }
+    } else {
+        *packet_o = String_create(buffer, rv);
+    }
+    memset(buffer, 0, rv);
+
+    // 3 byte packets are EXT, GDB, ect
+    // 7 byte or more have packet length
+    // in buffer pos 3 to 6
+    if (rv >= 7 && !append) {
+        uint32_t packet_length =
+            ntohl(String_parse_u32(packet_o, 3)) + UFTP_SEQ_PROTOCOL_SIZE;
+        if (packet_length != (uint32_t)rv) {
+            printf(
+                "recv_packet(): packet length %u, bytes "
+                "returned %i\n",
+                packet_length,
+                rv
+            );
+        }
+    }
+    return rv;
 }
 
 int send_sequenced_packet(
