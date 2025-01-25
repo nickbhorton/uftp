@@ -435,8 +435,8 @@ int handle_input(
     // put 'filename' onto server
     else if (strncmp("FLQ", packet_recv->data, 3) == 0) {
         char header[UFTP_HEADER_SIZE];
-        uint32_t seq_number;
-        uint32_t seq_total;
+        uint32_t seq_number = 0;
+        uint32_t seq_total = 0;
         String file_content_chunk = String_new();
         rv = parse_sequenced_packet(
             packet_recv,
@@ -447,10 +447,13 @@ int handle_input(
         );
         if (rv < 0) {
             String_free(&file_content_chunk);
-            rv = send_packet(
+            rv = send_sequenced_packet(
                 sock_poll[0].fd,
                 &client->address,
-                StringView_from_cstr("ERR")
+                "ERR",
+                seq_number,
+                seq_total,
+                StringView_from_cstr("")
             );
             if (rv < 0) {
                 return -1;
@@ -460,10 +463,13 @@ int handle_input(
         // if there is no filename bound to client send error
         if (client->writing_filename.len < 0) {
             String_free(&file_content_chunk);
-            rv = send_packet(
+            rv = send_sequenced_packet(
                 sock_poll[0].fd,
                 &client->address,
-                StringView_from_cstr("ERR")
+                "ERR",
+                seq_number,
+                seq_total,
+                StringView_from_cstr("")
             );
             if (rv < 0) {
                 return -1;
@@ -480,10 +486,13 @@ int handle_input(
             );
             if (rv < 0) {
                 String_free(&file_content_chunk);
-                rv = send_packet(
+                rv = send_sequenced_packet(
                     sock_poll[0].fd,
                     &client->address,
-                    StringView_from_cstr("ERR")
+                    "ERR",
+                    seq_number,
+                    seq_total,
+                    StringView_from_cstr("")
                 );
                 if (rv < 0) {
                     return -1;
@@ -499,10 +508,13 @@ int handle_input(
             );
             if (rv < 0) {
                 String_free(&file_content_chunk);
-                rv = send_packet(
+                rv = send_sequenced_packet(
                     sock_poll[0].fd,
                     &client->address,
-                    StringView_from_cstr("ERR")
+                    "ERR",
+                    seq_number,
+                    seq_total,
+                    StringView_from_cstr("")
                 );
                 if (rv < 0) {
                     return -1;
@@ -515,10 +527,13 @@ int handle_input(
         // TODO: this would be a good place to add a sequency number so if
         // packets are dropped or errored the client has the responsibility to
         // resend them
-        rv = send_packet(
+        rv = send_sequenced_packet(
             sock_poll[0].fd,
             &client->address,
-            StringView_from_cstr("SUC")
+            "SUC",
+            seq_number,
+            seq_total,
+            StringView_from_cstr("")
         );
         if (rv < 0) {
             return -1;
