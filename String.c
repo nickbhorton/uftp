@@ -1,5 +1,6 @@
 #include "String.h"
 #include <ctype.h>
+#include <errno.h>
 
 #define INIT_MALLOC 64
 
@@ -91,7 +92,7 @@ String String_from_cstr(const char* s)
     return String_create((char*)s, strlen(s));
 }
 
-char* String_to_cstr(String* s)
+char* String_to_cstr(const String* s)
 {
     char* s_cstr = malloc(s->len + 1);
     memset(s_cstr, 0, s->len + 1);
@@ -146,7 +147,7 @@ int String_cmpn_cstr(String* s1, const char* cstring, size_t n)
     return ret;
 }
 
-void String_push_copy(String* to, String* from)
+void String_push_copy(String* to, const String* from)
 {
     String_insertn(to, from->data, to->len, from->len);
 }
@@ -249,7 +250,7 @@ String String_from_file(String* filename)
 String String_from_file_chunked(
     String* filename,
     size_t chunk_size,
-    size_t chunk_index
+    size_t chunk_position
 )
 {
     char* filename_cstr = String_to_cstr(filename);
@@ -262,11 +263,11 @@ String String_from_file_chunked(
         free(filename_cstr);
         return s;
     }
+    free(filename_cstr);
 
     // goto the next chunk
-    fseek(fptr, chunk_size * chunk_index, SEEK_SET);
+    fseek(fptr, chunk_position, SEEK_SET);
     int in;
-    free(filename_cstr);
     for (size_t i = 0; i < chunk_size; i++) {
         in = fgetc(fptr);
         if (in == EOF) {
@@ -276,6 +277,43 @@ String String_from_file_chunked(
     }
     fclose(fptr);
     return s;
+}
+
+int String_to_file_chunked(
+    const String* chunk,
+    const String* filename,
+    size_t chunk_size,
+    size_t chunk_position
+)
+{
+    char* filename_cstr = String_to_cstr(filename);
+    FILE* fptr;
+    // b is ignored on linux but for portability?
+    fptr = fopen(filename_cstr, "ab");
+    if (fptr == NULL) {
+        fprintf(stderr, "failed to open file %s\n", filename_cstr);
+        free(filename_cstr);
+        return -1;
+    }
+    free(filename_cstr);
+
+    int start_pos = ftell(fptr);
+    // fill file with null bytes until chunk_position
+    while (start_pos < chunk_position) {
+        int rv = fputc('\0', fptr);
+        if (rv == EOF) {
+            int fputc_err = errno;
+            perror(strerror(fputc_err));
+        }
+        start_pos++;
+    }
+
+    // goto the next chunk
+    for (size_t i = 0; i < chunk_size; i++) {
+        fputc(String_get(chunk, i), fptr);
+    }
+    fclose(fptr);
+    return 0;
 }
 
 void String_to_file(String* s, String* filename)

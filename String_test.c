@@ -141,9 +141,9 @@ int main()
     }
     {
         const char* test_name = "String_from_file basic";
-        String filename = String_from_cstr("smnt/files/basic.txt");
+        String filename = String_from_cstr("serv/test1.serv");
         String contents = String_from_file(&filename);
-        String ans = String_from_cstr("abcdef\n");
+        String ans = String_from_cstr("this is a file on the server\n");
         printf("%s: ", test_name);
         if (String_cmp(&contents, &ans) == 0) {
             printf("%s\n", success);
@@ -193,5 +193,36 @@ int main()
         }
 
         String_free(&qnt);
+    }
+    {
+        const char* test_name = "String_to_file_chunked basic";
+        String filename = String_from_cstr("outfile.txt");
+        String contents_out = String_from_cstr("abcdefghij");
+        String_to_file_chunked(&contents_out, &filename, contents_out.len, 10);
+        String contents_in = String_from_file(&filename);
+        String cmp_str = String_new();
+        for (size_t i = 0; i < 10; i++) {
+            String_push_back(&cmp_str, '\0');
+        }
+        String_push_move(&cmp_str, contents_out);
+
+        printf("%s: ", test_name);
+        if (String_cmp(&cmp_str, &contents_in) == 0) {
+            printf("%s\n", success);
+        } else {
+            printf("%s\n", fail);
+            String_dbprint_hex(&contents_in);
+            String_dbprint_hex(&cmp_str);
+        }
+        String_free(&contents_in);
+        String_free(&cmp_str);
+
+        char* filename_cstr = String_to_cstr(&filename);
+        int ret = remove(filename_cstr);
+        if (ret < 0) {
+            printf("failed to rm outfile.txt from String_test\n");
+        }
+        free(filename_cstr);
+        String_free(&filename);
     }
 }

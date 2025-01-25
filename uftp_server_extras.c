@@ -31,6 +31,7 @@ void client_list_init(client_list_t* client_list)
 void client_list_free(client_list_t* client_list)
 {
     for (size_t i = 0; i < client_list->len; i++) {
+        String_free(&client_list->clients[i]->writing_filename);
         free(client_list->clients[i]);
     }
     client_list->len = 0;
@@ -38,7 +39,7 @@ void client_list_free(client_list_t* client_list)
     free(client_list->clients);
 }
 
-Address* get_client(
+Client* get_client(
     client_list_t* client_list,
     struct sockaddr_storage* client_addr,
     const socklen_t client_addr_len
@@ -46,7 +47,7 @@ Address* get_client(
 {
     for (size_t ci = 0; ci < client_list->len; ci++) {
         if (Address_cmp(
-                client_list->clients[ci],
+                &client_list->clients[ci]->address,
                 client_addr,
                 client_addr_len
             ) == 0) {
@@ -60,24 +61,24 @@ Address* get_client(
     // make sure there is enough memory for a new client
     if (client_list->cap == 0) {
         unsigned int starting_cap = 8;
-        client_list->clients = malloc(sizeof(Address*) * starting_cap);
+        client_list->clients = malloc(sizeof(Client*) * starting_cap);
         client_list->cap = starting_cap;
     } else {
         while (client_list->cap < client_list->len + 1) {
             client_list->cap = client_list->cap * 2;
             client_list->clients = realloc(
                 client_list->clients,
-                sizeof(Address*) * client_list->cap
+                sizeof(Client*) * client_list->cap
             );
         }
     }
     // allocate, clear and fill
-    client_list->clients[client_list->len] = (Address*)malloc(sizeof(Address));
-    memset(client_list->clients[client_list->len], 0, sizeof(Address));
-    client_list->clients[client_list->len]->addr = *client_addr;
-    client_list->clients[client_list->len]->addrlen = client_addr_len;
+    client_list->clients[client_list->len] = (Client*)malloc(sizeof(Client));
+    memset(client_list->clients[client_list->len], 0, sizeof(Client));
+    client_list->clients[client_list->len]->address.addr = *client_addr;
+    client_list->clients[client_list->len]->address.addrlen = client_addr_len;
 
-    Address* client_to_return = client_list->clients[client_list->len];
+    Client* client_to_return = client_list->clients[client_list->len];
 
     // incremement length
     client_list->len++;

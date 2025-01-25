@@ -378,7 +378,7 @@ int main(int argc, char** argv)
                             &server_address,
                             "PFL",
                             1,
-                            1,
+                            UFTP_BUFFER_SIZE - UFTP_SEQ_PROTOCOL_SIZE,
                             StringView_create(&filename, 0, filename.len)
                         );
                         if (bc_or_err < 0) {

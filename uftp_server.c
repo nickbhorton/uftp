@@ -23,11 +23,11 @@ int validate_port(int argc, char** argv);
 
 int server_loop(UdpBoundSocket* bs, StringVector* filenames);
 
-void print_input(Address* client, String* packet);
+void print_input(Client* client, String* packet);
 
 int handle_input(
     struct pollfd* sock_poll,
-    Address* client,
+    Client* client,
     String* packet_recv,
     StringVector* filenames
 );
@@ -154,8 +154,11 @@ int send_file(
     int total_sent = 0;
 
     for (size_t i = 0; i < total_seq; i++) {
-        String contents =
-            String_from_file_chunked(filename, file_chunk_size, i);
+        String contents = String_from_file_chunked(
+            filename,
+            file_chunk_size,
+            i * file_chunk_size
+        );
         // its also possible that the file does not exist
         rv = send_sequenced_packet(
             sockfd,
@@ -289,7 +292,7 @@ int recieve_file(
 
 int handle_input(
     struct pollfd* sock_poll,
-    Address* client,
+    Client* client,
     String* packet_recv,
     StringVector* filenames
 )
@@ -297,7 +300,11 @@ int handle_input(
     int rv;
     // exit
     if (strncmp("EXT", packet_recv->data, 3) == 0) {
-        rv = send_packet(sock_poll->fd, client, StringView_from_cstr("GDB"));
+        rv = send_packet(
+            sock_poll->fd,
+            &client->address,
+            StringView_from_cstr("GDB")
+        );
         if (rv < 0) {
             return rv;
         }
@@ -307,7 +314,7 @@ int handle_input(
         for (size_t i = 0; i < filenames->len; i++) {
             rv = send_sequenced_packet(
                 sock_poll->fd,
-                client,
+                &client->address,
                 "LSQ",
                 i + 1,
                 filenames->len,
@@ -339,7 +346,7 @@ int handle_input(
             String_free(&filename);
             rv = send_packet(
                 sock_poll[0].fd,
-                client,
+                &client->address,
                 StringView_from_cstr("ERR")
             );
             if (rv < 0) {
@@ -347,7 +354,7 @@ int handle_input(
             }
             return rv;
         }
-        rv = send_file(sock_poll->fd, client, &filename, filenames);
+        rv = send_file(sock_poll->fd, &client->address, &filename, filenames);
         String_free(&filename);
         return rv;
     }
@@ -364,11 +371,16 @@ int handle_input(
             &seq_total,
             &filename
         );
+        // repurpose seq_total for a chunk size hint in case the first FLQ
+        // packet to be recv is the last one with an unknow size
+        if (seq_total > 1) {
+            client->file_chunk_size_hint = seq_total;
+        }
         if (rv < 0) {
             String_free(&filename);
             rv = send_packet(
                 sock_poll[0].fd,
-                client,
+                &client->address,
                 StringView_from_cstr("ERR")
             );
             if (rv < 0) {
@@ -376,17 +388,150 @@ int handle_input(
             }
             return rv;
         }
-        rv = recieve_file(sock_poll, client, &filename);
-        if (rv < 0) {
+        // if there is already a file dont overwrite it
+        bool valid_filename = true;
+        for (size_t i = 0; i < filenames->len; i++) {
+            int cmp_val = String_cmp(&filenames->data[i], &filename);
+            if (cmp_val == 0) {
+                valid_filename = false;
+            }
+        }
+        if (!valid_filename) {
+            rv = send_packet(
+                sock_poll[0].fd,
+                &client->address,
+                // file overwrite
+                StringView_from_cstr("ERR")
+            );
             String_free(&filename);
+            if (rv < 0) {
+                return -1;
+            }
+        } else {
+            if (client->writing_filename.len > 0) {
+                String_free(&client->writing_filename);
+                client->writing_filename = String_new();
+            }
+            if (UFTP_DEBUG) {
+                printf(
+                    "client at port %i writting_file bound ",
+                    Address_port(&client->address)
+                );
+                String_print(&filename, true);
+            }
+            String_push_move(&client->writing_filename, filename);
+            rv = send_packet(
+                sock_poll[0].fd,
+                &client->address,
+                // file overwrite
+                StringView_from_cstr("SUC")
+            );
+            if (rv < 0) {
+                return -1;
+            }
+        }
+        return rv;
+    }
+    // put 'filename' onto server
+    else if (strncmp("FLQ", packet_recv->data, 3) == 0) {
+        char header[UFTP_HEADER_SIZE];
+        uint32_t seq_number;
+        uint32_t seq_total;
+        String file_content_chunk = String_new();
+        rv = parse_sequenced_packet(
+            packet_recv,
+            header,
+            &seq_number,
+            &seq_total,
+            &file_content_chunk
+        );
+        if (rv < 0) {
+            String_free(&file_content_chunk);
+            rv = send_packet(
+                sock_poll[0].fd,
+                &client->address,
+                StringView_from_cstr("ERR")
+            );
+            if (rv < 0) {
+                return -1;
+            }
             return rv;
         }
-        StringVector_push_back_move(filenames, filename);
+        // if there is no filename bound to client send error
+        if (client->writing_filename.len < 0) {
+            String_free(&file_content_chunk);
+            rv = send_packet(
+                sock_poll[0].fd,
+                &client->address,
+                StringView_from_cstr("ERR")
+            );
+            if (rv < 0) {
+                return -1;
+            }
+            return rv;
+        }
+        // if last chunk do special calculation for position
+        if (seq_number == seq_total) {
+            rv = String_to_file_chunked(
+                &file_content_chunk,
+                &client->writing_filename,
+                file_content_chunk.len,
+                (seq_number - 1) * client->file_chunk_size_hint
+            );
+            if (rv < 0) {
+                String_free(&file_content_chunk);
+                rv = send_packet(
+                    sock_poll[0].fd,
+                    &client->address,
+                    StringView_from_cstr("ERR")
+                );
+                if (rv < 0) {
+                    return -1;
+                }
+                return rv;
+            }
+        } else {
+            rv = String_to_file_chunked(
+                &file_content_chunk,
+                &client->writing_filename,
+                file_content_chunk.len,
+                (seq_number - 1) * file_content_chunk.len
+            );
+            if (rv < 0) {
+                String_free(&file_content_chunk);
+                rv = send_packet(
+                    sock_poll[0].fd,
+                    &client->address,
+                    StringView_from_cstr("ERR")
+                );
+                if (rv < 0) {
+                    return -1;
+                }
+                return rv;
+            }
+        }
+        String_free(&file_content_chunk);
+        // for each packet recv send a SUC
+        // TODO: this would be a good place to add a sequency number so if
+        // packets are dropped or errored the client has the responsibility to
+        // resend them
+        rv = send_packet(
+            sock_poll[0].fd,
+            &client->address,
+            StringView_from_cstr("SUC")
+        );
+        if (rv < 0) {
+            return -1;
+        }
         return rv;
     }
     // unknown command, send error
     else {
-        rv = send_packet(sock_poll->fd, client, StringView_from_cstr("ERR"));
+        rv = send_packet(
+            sock_poll->fd,
+            &client->address,
+            StringView_from_cstr("ERR")
+        );
         if (rv < 0) {
             return rv;
         }
@@ -418,7 +563,7 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
                 if (rv < 0 && UFTP_DEBUG) {
                     fprintf(stderr, "poll() unecpected event\n");
                 } else {
-                    Address* current_client =
+                    Client* current_client =
                         get_client(&cl, &client.addr, client.addrlen);
                     if (UFTP_DEBUG) {
                         print_input(current_client, &packet_in);
@@ -445,14 +590,14 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
     return 0;
 }
 
-void print_input(Address* client, String* packet)
+void print_input(Client* client, String* packet)
 {
     char client_str_buffer[INET6_ADDRSTRLEN];
     memset(&client_str_buffer, 0, sizeof(client_str_buffer));
-    uint16_t portnum = Address_port(client);
+    uint16_t portnum = Address_port(&client->address);
     const char* client_address_string = inet_ntop(
-        client->addr.ss_family,
-        Address_in_addr(client),
+        client->address.addr.ss_family,
+        Address_in_addr(&client->address),
         client_str_buffer,
         sizeof(client_str_buffer)
     );

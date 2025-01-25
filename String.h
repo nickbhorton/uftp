@@ -24,7 +24,9 @@ void String_set(String* s, size_t index, char c);
 
 void String_free(String* s);
 
-void String_push_copy(String* to, String* from);
+// Works like c++ copy leaves 'from' untouched while move give ownership of
+// 'from's data to 'to'.
+void String_push_copy(String* to, const String* from);
 void String_push_move(String* to, String from);
 
 // Serialization stuff
@@ -51,20 +53,27 @@ void String_dbprint_hex(String* s);
 
 // Read entire file into a String
 String String_from_file(String* filename);
-// Read file chunked into string
+// Read file chunk into string
 String String_from_file_chunked(
     String* filename,
     size_t chunk_size,
-    size_t chunk_index
+    size_t chunk_position
 );
 // Write entire String to file
 void String_to_file(String* s, String* filename);
+// Write a chunk to a file
+int String_to_file_chunked(
+    const String* chunk,
+    const String* filename,
+    size_t chunk_size,
+    size_t chunk_position
+);
 
 // These functions use strlen() an should only be used with c string constants
 String String_from_cstr(const char* s);
 
 // free responsiblity is given to the caller
-char* String_to_cstr(String* s);
+char* String_to_cstr(const String* s);
 
 typedef struct {
     const char* data;
