@@ -340,8 +340,7 @@ int main(int argc, char** argv)
                             String_free(&cmd);
                             return -rv;
                         }
-                        rv =
-                            recieve_file(&pfds[1], &server_address, &filename);
+                        rv = recieve_file(&pfds[1], &server_address, &filename);
                         if (rv < 0) {
                             String_free(&filename);
                             String_free(&cmd);
