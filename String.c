@@ -6,7 +6,7 @@
 
 // implementation secific
 
-void String_appendn(String* s, char* str, size_t size)
+void String_appendn(String* s, const char* str, size_t size)
 {
     for (size_t i = 0; i < size; i++) {
         String_push_back(s, str[i]);
@@ -14,7 +14,7 @@ void String_appendn(String* s, char* str, size_t size)
 }
 
 // for now if loc is greater than the end just add to end
-void String_insertn(String* s, char* str, size_t loc, size_t size)
+void String_insertn(String* s, const char* str, size_t loc, size_t size)
 {
     if ((int)loc > ((int)s->len) - 1) {
         String_appendn(s, str, size);
@@ -73,7 +73,7 @@ void String_free(String* s)
     s->len = 0;
 }
 
-String String_create(char* cstr, size_t size)
+String String_create(const char* cstr, size_t size)
 {
     if (INIT_MALLOC >= size) {
         String s =
@@ -118,7 +118,7 @@ void String_set(String* s, size_t index, char c)
     fprintf(stderr, "String_get out of bound\n");
 }
 
-int String_cmp(String* s1, String* s2)
+int String_cmp(const String* s1, const String* s2)
 {
     if (s1->len != s2->len) {
         return -1;
@@ -130,14 +130,14 @@ int String_cmp(String* s1, String* s2)
     }
     return 0;
 }
-int String_cmp_cstr(String* s1, const char* cstring)
+int String_cmp_cstr(const String* s1, const char* cstring)
 {
     String s2 = String_from_cstr(cstring);
     int ret = String_cmp(s1, &s2);
     String_free(&s2);
     return ret;
 }
-int String_cmpn_cstr(String* s1, const char* cstring, size_t n)
+int String_cmpn_cstr(const String* s1, const char* cstring, size_t n)
 {
     String s3 = String_create(s1->data, n);
     String s2 = String_create((char*)cstring, n);
@@ -158,7 +158,7 @@ void String_push_move(String* to, String from)
     free(from.data);
 }
 
-void String_dbprint(String* s)
+void String_dbprint(const String* s)
 {
     printf("length: %zu\t", s->len);
     printf("capacity: %zu\n", s->cap);
@@ -174,7 +174,7 @@ static void print_nibble_hex(size_t nibble)
     printf("%c", to_hex[nibble]);
 }
 
-void String_dbprint_hex(String* s)
+void String_dbprint_hex(const String* s)
 {
     printf("length: %zu\t", s->len);
     printf("capacity: %zu\n", s->cap);
@@ -217,7 +217,7 @@ void String_dbprint_hex(String* s)
     printf("|\n");
 }
 
-void String_print(String* s, bool with_newline)
+void String_print(const String* s, bool with_newline)
 {
     for (size_t i = 0; i < s->len; i++) {
         printf("%c", String_get(s, i));
@@ -227,7 +227,7 @@ void String_print(String* s, bool with_newline)
     }
 }
 
-String String_from_file(String* filename)
+String String_from_file(const String* filename)
 {
     char* filename_cstr = String_to_cstr(filename);
     FILE* fptr;
@@ -248,7 +248,7 @@ String String_from_file(String* filename)
 }
 
 String String_from_file_chunked(
-    String* filename,
+    const String* filename,
     size_t chunk_size,
     size_t chunk_position
 )
@@ -316,7 +316,7 @@ int String_to_file_chunked(
     return 0;
 }
 
-void String_to_file(String* s, String* filename)
+void String_to_file(String* file_content, const String* filename)
 {
     char* filename_cstr = String_to_cstr(filename);
     FILE* fptr;
@@ -327,8 +327,8 @@ void String_to_file(String* s, String* filename)
         return;
     }
     free(filename_cstr);
-    for (size_t i = 0; i < s->len; i++) {
-        fputc(String_get(s, i), fptr);
+    for (size_t i = 0; i < file_content->len; i++) {
+        fputc(String_get(file_content, i), fptr);
     }
     fclose(fptr);
 }

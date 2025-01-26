@@ -271,7 +271,7 @@ int main(int argc, char** argv)
 
     Address server;
     // byte count or err
-    int bc_or_err;
+    int rv;
     bool timed_out = false;
     while (1) {
         if (!timed_out) {
@@ -285,37 +285,37 @@ int main(int argc, char** argv)
         }
         timed_out = false;
         if (pfds[0].revents & POLLIN) {
-            bc_or_err = read(0, msg_buffer, sizeof(msg_buffer));
-            if (bc_or_err > 1) {
+            rv = read(0, msg_buffer, sizeof(msg_buffer));
+            if (rv > 1) {
                 // -1 to remove the \n for line buffered terminal?
-                String cmd = String_create(msg_buffer, bc_or_err - 1);
+                String cmd = String_create(msg_buffer, rv - 1);
                 if (String_cmp_cstr(&cmd, "ls") == 0) {
-                    bc_or_err = send_packet(
+                    rv = send_packet(
                         bs.fd,
                         &server_address,
                         StringView_from_cstr("LST")
                     );
-                    if (bc_or_err < 0) {
+                    if (rv < 0) {
                         String_free(&cmd);
-                        return -bc_or_err;
+                        return -rv;
                     }
-                    bc_or_err = handle_ls_response(&pfds[1], &server_address);
-                    if (bc_or_err < 0) {
+                    rv = handle_ls_response(&pfds[1], &server_address);
+                    if (rv < 0) {
                         String_free(&cmd);
-                        return bc_or_err;
+                        return rv;
                     }
                 } else if (String_cmp_cstr(&cmd, "exit") == 0) {
-                    bc_or_err = send_packet(
+                    rv = send_packet(
                         bs.fd,
                         &server_address,
                         StringView_from_cstr("EXT")
                     );
-                    if (bc_or_err < 0) {
-                        return -bc_or_err;
+                    if (rv < 0) {
+                        return -rv;
                     }
-                    bc_or_err = handle_exit_response(&pfds[1], &server_address);
-                    if (bc_or_err < 0) {
-                        return -bc_or_err;
+                    rv = handle_exit_response(&pfds[1], &server_address);
+                    if (rv < 0) {
+                        return -rv;
                     }
                     String_free(&cmd);
                     // exit from while loop
@@ -327,7 +327,7 @@ int main(int argc, char** argv)
                             StringVector_get(&get_args, 1)->data,
                             StringVector_get(&get_args, 1)->len
                         );
-                        bc_or_err = send_sequenced_packet(
+                        rv = send_sequenced_packet(
                             bs.fd,
                             &server_address,
                             "GFL",
@@ -335,18 +335,18 @@ int main(int argc, char** argv)
                             1,
                             StringView_create(&filename, 0, filename.len)
                         );
-                        if (bc_or_err < 0) {
+                        if (rv < 0) {
                             String_free(&filename);
                             String_free(&cmd);
-                            return -bc_or_err;
+                            return -rv;
                         }
-                        bc_or_err =
+                        rv =
                             recieve_file(&pfds[1], &server_address, &filename);
-                        if (bc_or_err < 0) {
+                        if (rv < 0) {
                             String_free(&filename);
                             String_free(&cmd);
-                            return bc_or_err;
-                        } else if (bc_or_err == 1) {
+                            return rv;
+                        } else if (rv == 1) {
                             printf("uftp_client: ");
                             String_print(&filename, false);
                             printf(": No such file\n");
@@ -373,7 +373,7 @@ int main(int argc, char** argv)
                             String_free(&cmd);
                             continue;
                         }
-                        bc_or_err = send_sequenced_packet(
+                        rv = send_sequenced_packet(
                             bs.fd,
                             &server_address,
                             "PFL",
@@ -381,13 +381,13 @@ int main(int argc, char** argv)
                             UFTP_BUFFER_SIZE - UFTP_SEQ_PROTOCOL_SIZE,
                             StringView_create(&filename, 0, filename.len)
                         );
-                        if (bc_or_err < 0) {
+                        if (rv < 0) {
                             String_free(&contents);
                             String_free(&filename);
                             String_free(&cmd);
-                            return -bc_or_err;
+                            return -rv;
                         }
-                        bc_or_err = send_sequenced_packet(
+                        rv = send_sequenced_packet(
                             bs.fd,
                             &server_address,
                             "FLQ",
@@ -395,11 +395,11 @@ int main(int argc, char** argv)
                             1,
                             StringView_create(&contents, 0, contents.len)
                         );
-                        if (bc_or_err < 0) {
+                        if (rv < 0) {
                             String_free(&contents);
                             String_free(&filename);
                             String_free(&cmd);
-                            return bc_or_err;
+                            return rv;
                         }
                         String_free(&contents);
                         String_free(&filename);
@@ -422,8 +422,8 @@ int main(int argc, char** argv)
             }
         } else if (pfds[1].revents & POLLIN) {
             String packet;
-            bc_or_err = recv_packet(pfds[1].fd, &server, &packet, false);
-            if (bc_or_err > 0) {
+            rv = recv_packet(pfds[1].fd, &server, &packet, false);
+            if (rv > 0) {
                 String_dbprint_hex(&packet);
                 String_free(&packet);
             } else {

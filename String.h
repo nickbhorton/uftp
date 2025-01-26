@@ -14,7 +14,7 @@ typedef struct {
 } String;
 
 String String_new();
-String String_create(char* arr, size_t size);
+String String_create(const char* arr, size_t size);
 
 void String_push_back(String* s, char c);
 
@@ -43,24 +43,24 @@ int16_t String_parse_i16(const String* s, size_t loc);
 // if 0 strings are equal
 // if -1 strings are not of equal length
 // if positive, index of first non equal
-int String_cmp(String* s1, String* s2);
-int String_cmp_cstr(String* s1, const char* cstring);
-int String_cmpn_cstr(String* s1, const char* cstring, size_t n);
+int String_cmp(const String* s1, const String* s2);
+int String_cmp_cstr(const String* s1, const char* cstring);
+int String_cmpn_cstr(const String* s1, const char* cstring, size_t n);
 
-void String_print(String* s, bool with_newline);
-void String_dbprint(String* s);
-void String_dbprint_hex(String* s);
+void String_print(const String* s, bool with_newline);
+void String_dbprint(const String* s);
+void String_dbprint_hex(const String* s);
 
 // Read entire file into a String
-String String_from_file(String* filename);
+String String_from_file(const String* filename);
 // Read file chunk into string
 String String_from_file_chunked(
-    String* filename,
+    const String* filename,
     size_t chunk_size,
     size_t chunk_position
 );
 // Write entire String to file
-void String_to_file(String* s, String* filename);
+void String_to_file(String* s, const String* filename);
 // Write a chunk to a file
 int String_to_file_chunked(
     const String* chunk,

@@ -112,7 +112,11 @@ UdpBoundSocket get_udp_socket(const char* addr, const char* port)
     return bound_sock;
 }
 
-void* Address_in_addr(Address* a)
+/*
+ * from beej returns a pointer to either a addr_sin or addr_sin6 dependand on
+ * addr.ss_family
+ */
+void* Address_in_addr(const Address* a)
 {
     if (a->addr.ss_family == AF_INET) {
         return &(((struct sockaddr_in*)&a->addr)->sin_addr);
@@ -121,12 +125,12 @@ void* Address_in_addr(Address* a)
     return &(((struct sockaddr_in6*)&a->addr)->sin6_addr);
 }
 
-struct sockaddr* Address_sockaddr(Address* a)
+struct sockaddr* Address_sockaddr(const Address* a)
 {
     return (struct sockaddr*)&a->addr;
 }
 
-uint16_t Address_port(Address* a)
+uint16_t Address_port(const Address* a)
 {
     if (a->addr.ss_family == AF_INET) {
         return ntohs(((struct sockaddr_in*)&a->addr)->sin_port);
@@ -136,10 +140,15 @@ uint16_t Address_port(Address* a)
     return 0;
 }
 
-int send_packet(int sockfd, Address* to, StringView packet)
+/*
+ * returns:
+ *   -1 if error
+ *   >=0 if no error and indicates number is bytes sent
+ */
+int send_packet(int sockfd, const Address* to, const StringView packet)
 {
-    int bytes_sent;
-    if ((bytes_sent = sendto(
+    int rv;
+    if ((rv = sendto(
              sockfd,
              packet.data,
              packet.len,
@@ -150,7 +159,7 @@ int send_packet(int sockfd, Address* to, StringView packet)
         int sendto_err = errno;
         fprintf(stderr, "sendto() error: %s\n", strerror(sendto_err));
         return -1;
-    } else if (bytes_sent != packet.len) {
+    } else if (rv != packet.len) {
         fprintf(
             stderr,
             "send_packet() error: %s\n",
@@ -158,7 +167,7 @@ int send_packet(int sockfd, Address* to, StringView packet)
         );
         return -1;
     }
-    return bytes_sent;
+    return rv;
 }
 
 int recv_packet(int sockfd, Address* from, String* packet_o, bool append)
@@ -216,13 +225,27 @@ int recv_packet(int sockfd, Address* from, String* packet_o, bool append)
     return rv;
 }
 
+/*
+ * protocol:
+ *   header (char[UFTP_HEADER_SIZE]): indicates what kind of sequence this is.
+ *      Why?
+ *      1. hexdump type commands
+ *      2. multiple types of sequenced data sent out at a time
+ *   packet_length (uint32_t): size of payload
+ *   seq_number (uint32_t): numbered packet in the sequence
+ *   seq_total (uint32_t): total number of packets in the sequence
+ *   payload (char[variable]): contents of packet
+ * returns:
+ *   -1 if error
+ *   >=0 if no error and incicates number of bytes sent
+ */
 int send_sequenced_packet(
     int sockfd,
-    Address* to,
-    char header[3],
+    const Address* to,
+    const char header[UFTP_HEADER_SIZE],
     uint32_t seq_number,
     uint32_t seq_total,
-    StringView payload
+    const StringView payload
 )
 {
     String packet = String_create(header, 3);
@@ -232,12 +255,17 @@ int send_sequenced_packet(
     String_push_u32(&packet, htonl(seq_total));
     String_push_sv(&packet, payload);
 
-    int bytes_sent_or_error =
-        send_packet(sockfd, to, StringView_create(&packet, 0, packet.len));
+    int rv = send_packet(sockfd, to, StringView_create(&packet, 0, packet.len));
     String_free(&packet);
-    return bytes_sent_or_error;
+    return rv;
 }
 
+/*
+ * returns:
+ *   -1 if error
+ *   0 if no error, indicates header_o, seq_number_o, seq_total_o, payload_o
+ *   have been filled.
+ */
 int parse_sequenced_packet(
     const String* packet,
     char header_o[UFTP_HEADER_SIZE],
@@ -279,6 +307,13 @@ int parse_sequenced_packet(
     return 0;
 }
 
+/*
+ * Potentailly very harmfull command, should not be used based on any user
+ * input, the cmd parameter should be directly filled with a c string constant.
+ * returns:
+ *   -1 if popen() fails
+ *   >=0 if no error and indicates number of bytes in cout_o
+ */
 int get_shell_cmd_cout(const char* cmd, String* cout_o)
 {
     FILE* fptr;
