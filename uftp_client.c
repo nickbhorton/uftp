@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "String.h"
@@ -131,8 +132,8 @@ int recieve_file(
 {
     uint32_t number_packets_to_recv = 0;
     uint32_t number_packets_recv = 0;
-    StringVector file = StringVector_new();
     uint32_t total_payload_size = 0;
+    uint32_t payload_size_hint = 0;
 
     while (1) {
         if (number_packets_recv == number_packets_to_recv &&
@@ -143,18 +144,15 @@ int recieve_file(
         if (num_events != 0) {
             if (sock_poll[0].revents & POLLIN) {
                 String packet;
-                int bytes_recv =
-                    recv_packet(sock_poll[0].fd, address, &packet, false);
-                if (bytes_recv < 0) {
+                int rv = recv_packet(sock_poll[0].fd, address, &packet, false);
+                if (rv < 0) {
                     String_free(&packet);
-                    StringVector_free(&file);
-                    return bytes_recv;
+                    return rv;
                 } else {
                     if (strncmp(packet.data, "FNO", UFTP_HEADER_SIZE) == 0) {
                         String_free(&packet);
                         // probably indicates no file on server
-                        StringVector_free(&file);
-                        return 1;
+                        return -3;
                     }
                     char header[UFTP_HEADER_SIZE];
                     uint32_t seq_number;
@@ -169,10 +167,17 @@ int recieve_file(
                     );
                     String_free(&packet);
                     if (rv < 0) {
-                        StringVector_free(&file);
                         return rv;
                     }
+
                     number_packets_recv++;
+                    // TODO: what if first packet is last file chunk
+                    if (payload_size_hint == 0) {
+                        payload_size_hint = payload.len;
+                        if (UFTP_DEBUG) {
+                            printf("payload_size_hint %i\n", payload_size_hint);
+                        }
+                    }
                     if (strncmp(header, "FLQ", UFTP_HEADER_SIZE) != 0) {
                         // not a critical error
                         fprintf(
@@ -189,8 +194,23 @@ int recieve_file(
                             "sequenced packet seq_total did not match\n"
                         );
                     }
-                    total_payload_size += bytes_recv - UFTP_SEQ_PROTOCOL_SIZE;
-                    StringVector_push_back_move(&file, payload);
+                    total_payload_size += payload.len;
+                    String_to_file_chunked(
+                        &payload,
+                        filename_to_recv,
+                        payload.len,
+                        payload_size_hint * (seq_number - 1)
+                    );
+                    if (UFTP_DEBUG) {
+                        String_print(filename_to_recv, false);
+                        printf(
+                            " chunk written %i/%i at %i of size %zu\n",
+                            seq_number,
+                            seq_total,
+                            payload_size_hint * (seq_number - 1),
+                            payload.len
+                        );
+                    }
                 }
             }
         } else {
@@ -198,29 +218,123 @@ int recieve_file(
             break;
         }
     }
-    String file_content = String_new();
-    if (UFTP_DEBUG) {
-        printf("file vector size %zu\n", file.len);
-        printf(
-            "average payload size %f\n",
-            ((float)total_payload_size) / ((float)file.len)
-        );
-    }
-    for (size_t i = 0; i < file.len; i++) {
-        String content = String_create(
-            StringVector_get(&file, i)->data,
-            StringVector_get(&file, i)->len
-        );
-        String_push_move(&file_content, content);
-    }
-    StringVector_free(&file);
-    if (UFTP_DEBUG) {
-        printf("file size %zu\n", file_content.len);
-    }
+    return 0;
+}
 
-    // to file
-    String_to_file(&file_content, filename_to_recv);
-    String_free(&file_content);
+int put_file(
+    struct pollfd* pfd,
+    Address* server_address,
+    const StringVector* args,
+    const String* cmd
+)
+{
+    int sockfd = pfd[0].fd;
+    String filename = String_create(
+        StringVector_get(args, 1)->data,
+        StringVector_get(args, 1)->len
+    );
+    struct stat filestats;
+    const char* filename_cstr = String_to_cstr(&filename);
+    int rv = stat(filename_cstr, &filestats);
+    free((void*)filename_cstr);
+
+    if (rv < 0) {
+        int stat_err = errno;
+        if (stat_err == EBADF || stat_err == EACCES) {
+            printf("-uftp_client: ");
+            printf(": No such file'\n");
+            String_free(&filename);
+            return 0;
+        } else {
+            fprintf(
+                stderr,
+                "send_file::stat() error: %s\n",
+                strerror(stat_err)
+            );
+            String_free(&filename);
+            return -1;
+        }
+    }
+    size_t file_length = filestats.st_size;
+    size_t chunk_length = UFTP_BUFFER_SIZE - UFTP_SEQ_PROTOCOL_SIZE;
+    size_t chunk_count = file_length / chunk_length;
+    size_t final_chunk_length = file_length % chunk_length;
+    // send server the filename and chunk length hint
+    rv = send_sequenced_packet(
+        sockfd,
+        server_address,
+        "PFL",
+        1,
+        chunk_length,
+        StringView_create(&filename, 0, filename.len)
+    );
+    if (rv < 0) {
+        String_free(&filename);
+        return rv;
+    }
+    // get ERR or SUC from server
+    while (1) {
+        int events = poll(pfd, 1, UFTP_TIMEOUT_MS);
+        if (events == 0) {
+            printf("timed out\n");
+            String_free(&filename);
+            return 0;
+        } else if (pfd[0].revents & POLLIN) {
+            String packet_in = String_new();
+            rv = recv_packet(pfd[0].fd, server_address, &packet_in, false);
+            if (rv < 0) {
+                String_free(&filename);
+                return rv;
+            } else if (strncmp(packet_in.data, "SUC", 3)) {
+                break;
+            } else if (strncmp(packet_in.data, "ERR", 3)) {
+                printf("server error\n");
+                String_free(&filename);
+                return 0;
+            }
+        }
+        printf("poll did something unexpected\n");
+        return -1;
+    }
+    // send all file chunks but the last one
+    for (size_t i = 0; i < chunk_count; i++) {
+        String chunk =
+            String_from_file_chunked(&filename, chunk_length, i * chunk_length);
+        rv = send_sequenced_packet(
+            sockfd,
+            server_address,
+            "FLQ",
+            i + 1,
+            chunk_count + 1, // + 1 for the final chunk
+            StringView_create(&chunk, 0, chunk.len)
+        );
+        String_free(&chunk);
+        if (rv < 0) {
+            String_free(&filename);
+            return rv;
+        }
+    }
+    if (final_chunk_length > 0) {
+        String chunk = String_from_file_chunked(
+            &filename,
+            final_chunk_length,
+            chunk_count * chunk_length
+        );
+        rv = send_sequenced_packet(
+            sockfd,
+            server_address,
+            "FLQ",
+            chunk_count + 1,
+            chunk_count + 1,
+            StringView_create(&chunk, 0, chunk.len)
+        );
+        String_free(&chunk);
+        if (rv < 0) {
+            String_free(&filename);
+            return rv;
+        }
+    }
+    String_free(&filename);
     return 0;
 }
 
@@ -321,11 +435,11 @@ int main(int argc, char** argv)
                     // exit from while loop
                     break;
                 } else if (String_cmpn_cstr(&cmd, "get", 3) == 0) {
-                    StringVector get_args = StringVector_from_split(&cmd, ' ');
-                    if (get_args.len >= 2) {
+                    StringVector args = StringVector_from_split(&cmd, ' ');
+                    if (args.len >= 2) {
                         String filename = String_create(
-                            StringVector_get(&get_args, 1)->data,
-                            StringVector_get(&get_args, 1)->len
+                            StringVector_get(&args, 1)->data,
+                            StringVector_get(&args, 1)->len
                         );
                         rv = send_sequenced_packet(
                             bs.fd,
@@ -355,58 +469,21 @@ int main(int argc, char** argv)
                         printf("-uftp_client: ");
                         printf(": usage is 'get <filename>'\n");
                     }
-                    StringVector_free(&get_args);
+                    StringVector_free(&args);
                 } else if (String_cmpn_cstr(&cmd, "put", 3) == 0) {
-                    StringVector get_args = StringVector_from_split(&cmd, ' ');
-                    if (get_args.len >= 2) {
-                        String filename = String_create(
-                            StringVector_get(&get_args, 1)->data,
-                            StringVector_get(&get_args, 1)->len
-                        );
-                        String contents = String_from_file(&filename);
-                        // TODO: this is a bad way to check this
-                        if (contents.len == 0 && contents.cap == 0) {
-                            printf("-uftp_client: ");
-                            printf(": No such file'\n");
-                            String_free(&filename);
-                            String_free(&cmd);
-                            continue;
-                        }
-                        rv = send_sequenced_packet(
-                            bs.fd,
-                            &server_address,
-                            "PFL",
-                            1,
-                            UFTP_BUFFER_SIZE - UFTP_SEQ_PROTOCOL_SIZE,
-                            StringView_create(&filename, 0, filename.len)
-                        );
+                    StringVector args = StringVector_from_split(&cmd, ' ');
+                    if (args.len >= 2) {
+                        rv = put_file(&pfds[1], &server_address, &args, &cmd);
                         if (rv < 0) {
-                            String_free(&contents);
-                            String_free(&filename);
-                            String_free(&cmd);
-                            return -rv;
-                        }
-                        rv = send_sequenced_packet(
-                            bs.fd,
-                            &server_address,
-                            "FLQ",
-                            1,
-                            1,
-                            StringView_create(&contents, 0, contents.len)
-                        );
-                        if (rv < 0) {
-                            String_free(&contents);
-                            String_free(&filename);
+                            StringVector_free(&args);
                             String_free(&cmd);
                             return rv;
                         }
-                        String_free(&contents);
-                        String_free(&filename);
                     } else {
                         printf("-uftp_client: ");
-                        printf(": usage is 'get <filename>'\n");
+                        printf(": usage is 'put <filename>'\n");
                     }
-                    StringVector_free(&get_args);
+                    StringVector_free(&args);
                 } else {
                     printf("-uftp_client: ");
                     String_print(&cmd, false);

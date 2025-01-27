@@ -16,7 +16,7 @@ void StringVector_free(StringVector* sv)
     free(sv->data);
 }
 
-void StringVector_dbprint(StringVector* sv)
+void StringVector_dbprint(const StringVector* sv)
 {
     printf("length: %zu\n", sv->len);
     printf("capacity: %zu\n", sv->cap);
@@ -26,7 +26,7 @@ void StringVector_dbprint(StringVector* sv)
     }
 }
 
-String* StringVector_get(StringVector* sv, size_t index)
+String* StringVector_get(const StringVector* sv, size_t index)
 {
     if (index < sv->len) {
         return &sv->data[index];
@@ -52,7 +52,7 @@ void StringVector_push_back_move(StringVector* sv, String s)
     String_push_move(&sv->data[sv->len - 1], s);
 }
 
-void StringVector_push_back_copy(StringVector* sv, String* s)
+void StringVector_push_back_copy(StringVector* sv, const String* s)
 {
     if (sv->len == 0) {
         sv->data = malloc(sizeof(String));
@@ -69,7 +69,7 @@ void StringVector_push_back_copy(StringVector* sv, String* s)
     String_push_copy(&sv->data[sv->len - 1], s);
 }
 
-StringVector StringVector_from_split(String* s, char split_on)
+StringVector StringVector_from_split(const String* s, char split_on)
 {
     char in;
     StringVector sv = StringVector_new();

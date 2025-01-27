@@ -274,7 +274,7 @@ int parse_sequenced_packet(
     String* payload_o
 )
 {
-    if (packet->len < UFTP_HEADER_SIZE + 3 * sizeof(uint32_t)) {
+    if (packet->len < UFTP_SEQ_PROTOCOL_SIZE) {
         fprintf(
             stderr,
             "parse_sequence_packet() error, packet length was not long enough "
@@ -286,7 +286,7 @@ int parse_sequenced_packet(
         header_o[i] = String_get(packet, i);
     }
     uint32_t payload_len = ntohl(String_parse_u32(packet, UFTP_HEADER_SIZE));
-    if (packet->len < UFTP_HEADER_SIZE + 3 * sizeof(uint32_t) + payload_len) {
+    if (packet->len < UFTP_SEQ_PROTOCOL_SIZE + payload_len) {
         fprintf(
             stderr,
             "parse_sequence_packet() error, packet length was not long enough "

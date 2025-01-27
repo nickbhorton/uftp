@@ -19,7 +19,7 @@
 
 #define UFTP_TIMEOUT_MS 1000
 
-#define UFTP_SEQ_PROTOCOL_SIZE (3 + 3 * sizeof(uint32_t))
+#define UFTP_SEQ_PROTOCOL_SIZE (UFTP_HEADER_SIZE + 3 * sizeof(uint32_t))
 
 typedef struct {
     struct sockaddr_storage addr;

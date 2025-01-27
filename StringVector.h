@@ -10,15 +10,15 @@ typedef struct {
 } StringVector;
 
 // bounds checked access
-String* StringVector_get(StringVector* s, size_t index);
+String* StringVector_get(const StringVector* s, size_t index);
 
 StringVector StringVector_new();
 void StringVector_free(StringVector* sv);
-void StringVector_dbprint(StringVector* sv);
+void StringVector_dbprint(const StringVector* sv);
 
 void StringVector_push_back_move(StringVector* sv, String s);
-void StringVector_push_back_copy(StringVector* sv, String* s);
+void StringVector_push_back_copy(StringVector* sv, const String* s);
 
-StringVector StringVector_from_split(String* s, char split_on);
+StringVector StringVector_from_split(const String* s, char split_on);
 
 #endif
