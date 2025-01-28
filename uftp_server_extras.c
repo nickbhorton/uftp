@@ -1,10 +1,9 @@
+#include "uftp.h"
 #include "uftp_server.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int debug = 1;
 
 int Address_cmp(
     const Address* address,
@@ -51,9 +50,6 @@ Client* get_client(
                 client_addr,
                 client_addr_len
             ) == 0) {
-            if (debug) {
-                printf("found client\n");
-            }
             return client_list->clients[ci];
         }
     }
@@ -82,7 +78,7 @@ Client* get_client(
 
     // incremement length
     client_list->len++;
-    if (debug) {
+    if (UFTP_DEBUG) {
         printf(
             "new client created, client_list length: %zu, client_list "
             "capacity: %zu\n",

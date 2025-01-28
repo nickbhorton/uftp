@@ -7,3 +7,7 @@ fileio_test
 
 .clang*
 *.o
+
+# flie is a gig
+serv/test4.serv
+clie/test4.clie

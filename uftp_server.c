@@ -118,6 +118,7 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
 
 int send_ERR(int sockfd, const Address* client)
 {
+    printf("sent ERR\n");
     return send_packet(sockfd, client, StringView_from_cstr("ERR"));
 }
 
@@ -358,6 +359,16 @@ int handle_FLQ(
             return rv;
         }
     }
+    if (seq_total < 8 || seq_number % 1000 == 0 || seq_number == seq_total) {
+        printf("successful write of ");
+        String_print(&client->writing_filename, false);
+        printf(
+            " %i/%i of size %zu\n",
+            seq_number,
+            seq_total,
+            file_content_chunk.len
+        );
+    }
     String_free(&file_content_chunk);
     // for each packet recv send a SUC
     rv = send_sequenced_packet(
@@ -371,10 +382,12 @@ int handle_FLQ(
     if (rv < 0) {
         return -2;
     }
+    /*
     if (UFTP_DEBUG) {
         String_print(&client->writing_filename, false);
         printf(" chunk written %i/%i\n", seq_number, seq_total);
     }
+    */
     return rv;
 }
 
@@ -518,8 +531,10 @@ void print_input(Client* client, String* packet)
         client_str_buffer,
         sizeof(client_str_buffer)
     );
-    printf("%s:%u(%zu):\n", client_address_string, portnum, packet->len);
-    String_dbprint_hex(packet);
+    if (packet->len < 64) {
+        printf("%s:%u(%zu):\n", client_address_string, portnum, packet->len);
+        String_dbprint_hex(packet);
+    }
 }
 
 int validate_port(int argc, char** argv)

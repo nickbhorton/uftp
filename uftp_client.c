@@ -258,8 +258,8 @@ int put_file(
     }
     size_t file_length = filestats.st_size;
     size_t chunk_length = UFTP_BUFFER_SIZE - UFTP_SEQ_PROTOCOL_SIZE;
-    size_t chunk_count = file_length / chunk_length;
-    size_t final_chunk_length = file_length % chunk_length;
+    size_t chunk_count = file_length / chunk_length + 1;
+
     // send server the filename and chunk length hint
     rv = send_sequenced_packet(
         sockfd,
@@ -273,7 +273,8 @@ int put_file(
         String_free(&filename);
         return rv;
     }
-    // get ERR or SUC from server
+
+    // get ERR or SUC from server before sending file
     while (1) {
         int events = poll(pfd, 1, UFTP_TIMEOUT_MS);
         if (events == 0) {
@@ -301,104 +302,130 @@ int put_file(
         printf("poll did something unexpected\n");
         return -1;
     }
-    // send all file chunks but the last one
-    for (size_t i = 0; i < chunk_count; i++) {
-        String chunk =
-            String_from_file_chunked(&filename, chunk_length, i * chunk_length);
-        rv = send_sequenced_packet(
-            sockfd,
-            server_address,
-            "FLQ",
-            i + 1,
-            chunk_count + 1, // + 1 for the final chunk
-            StringView_create(&chunk, 0, chunk.len)
-        );
-        String_free(&chunk);
-        if (rv < 0) {
-            String_free(&filename);
-            return rv;
-        }
-    }
-    if (final_chunk_length > 0) {
-        String chunk = String_from_file_chunked(
-            &filename,
-            final_chunk_length,
-            chunk_count * chunk_length
-        );
-        rv = send_sequenced_packet(
-            sockfd,
-            server_address,
-            "FLQ",
-            chunk_count + 1,
-            chunk_count + 1,
-            StringView_create(&chunk, 0, chunk.len)
-        );
-        String_free(&chunk);
-        if (rv < 0) {
-            String_free(&filename);
-            return rv;
-        }
-    }
-    String_free(&filename);
-    // see what packets ERR vs SUC
 
-    // including final chunk in chunk count
-    chunk_count = chunk_count + 1;
-    size_t response_count = 0;
+    // send and recv packets from server
+    size_t chunk_index = 0;
+    size_t success_count = 0;
+
+    // turn on out and in for socket
+    pfd[0].events = POLLIN | POLLOUT;
     while (1) {
-        if (chunk_count == response_count) {
+        if (success_count == chunk_count) {
+            if (UFTP_DEBUG) {
+                printf("file sent successfully\n");
+            }
             break;
         }
         int events = poll(pfd, 1, UFTP_TIMEOUT_MS);
         if (events == 0) {
-            printf("timed out\n");
-            return 0;
-        } else if (pfd[0].revents & POLLIN) {
-            response_count++;
-            String packet_in = String_new();
-            rv = recv_packet(pfd[0].fd, server_address, &packet_in, false);
-            if (rv < 0) {
-                String_free(&packet_in);
-                return rv;
-            } else if (strncmp(packet_in.data, "SUC", 3) == 0) {
-                char header[UFTP_HEADER_SIZE];
-                uint32_t seq_number;
-                uint32_t seq_total;
-                rv = parse_sequenced_packet(
-                    &packet_in,
-                    header,
-                    &seq_number,
-                    &seq_total,
-                    NULL
-                );
-                if (rv < 0) {
-                    String_free(&packet_in);
-                    return rv;
+            printf(
+                "timed out %zu/%zu success progress\n",
+                success_count,
+                chunk_count
+            );
+            break;
+        } else if (events > 0) {
+            // send chunks
+            if (pfd->revents & POLLOUT) {
+                if (chunk_index < chunk_count - 1) {
+                    // send non final chunk
+                    String chunk = String_from_file_chunked(
+                        &filename,
+                        chunk_length,
+                        chunk_index * chunk_length
+                    );
+                    rv = send_sequenced_packet(
+                        sockfd,
+                        server_address,
+                        "FLQ",
+                        chunk_index + 1,
+                        chunk_count,
+                        StringView_create(&chunk, 0, chunk.len)
+                    );
+                    String_free(&chunk);
+                    if (rv < 0) {
+                        String_free(&filename);
+                        return rv;
+                    }
+                } else if (chunk_index == chunk_count - 1) {
+                    // send final chunk
+                    String chunk = String_from_file_chunked(
+                        &filename,
+                        file_length % chunk_length,
+                        chunk_index * chunk_length
+                    );
+                    rv = send_sequenced_packet(
+                        sockfd,
+                        server_address,
+                        "FLQ",
+                        chunk_index + 1,
+                        chunk_count, // + 1 for the final chunk
+                        StringView_create(&chunk, 0, chunk.len)
+                    );
+                    String_free(&chunk);
+                    if (rv < 0) {
+                        String_free(&filename);
+                        return rv;
+                    }
+                } else if (chunk_index == chunk_count) {
+                    // turn off sending capabilities
+                    pfd->events = POLLIN;
                 }
-                printf("SUC %i/%i\n", seq_number, seq_total);
-            } else if (strncmp(packet_in.data, "ERR", 3) == 0) {
-                char header[UFTP_HEADER_SIZE];
-                uint32_t seq_number;
-                uint32_t seq_total;
-                rv = parse_sequenced_packet(
-                    &packet_in,
-                    header,
-                    &seq_number,
-                    &seq_total,
-                    NULL
-                );
-                if (rv < 0) {
-                    String_free(&packet_in);
-                    return rv;
-                }
-                printf("ERR %i/%i\n", seq_number, seq_total);
+                chunk_index++;
             }
-            String_free(&packet_in);
+            // recv response from server
+            if (pfd->revents & POLLIN) {
+                String packet_in = String_new();
+                rv = recv_packet(pfd[0].fd, server_address, &packet_in, false);
+                if (rv < 0) {
+                    String_free(&packet_in);
+                    return rv;
+                } else if (strncmp(packet_in.data, "SUC", 3) == 0) {
+                    success_count++;
+                    char header[UFTP_HEADER_SIZE];
+                    uint32_t seq_number;
+                    uint32_t seq_total;
+                    rv = parse_sequenced_packet(
+                        &packet_in,
+                        header,
+                        &seq_number,
+                        &seq_total,
+                        NULL
+                    );
+                    if (rv < 0) {
+                        String_free(&packet_in);
+                        return rv;
+                    }
+                } else if (strncmp(packet_in.data, "ERR", 3) == 0) {
+                    char header[UFTP_HEADER_SIZE];
+                    uint32_t seq_number;
+                    uint32_t seq_total;
+                    rv = parse_sequenced_packet(
+                        &packet_in,
+                        header,
+                        &seq_number,
+                        &seq_total,
+                        NULL
+                    );
+                    if (rv < 0) {
+                        String_free(&packet_in);
+                        return rv;
+                    }
+                    if (UFTP_DEBUG) {
+                        printf("ERR %i/%i\n", seq_number, seq_total);
+                    }
+                } else {
+                    printf("strange packet from server\n");
+                }
+                String_free(&packet_in);
+            }
         } else {
             printf("poll did something unexpected\n");
             return -1;
         }
     }
+    // turn of in for socket
+    pfd->events = POLLIN;
     return 0;
 }
 
