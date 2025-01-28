@@ -211,6 +211,7 @@ int recieve_file(
                             payload.len
                         );
                     }
+                    String_free(&payload);
                 }
             }
         } else {
@@ -283,15 +284,19 @@ int put_file(
             String packet_in = String_new();
             rv = recv_packet(pfd[0].fd, server_address, &packet_in, false);
             if (rv < 0) {
+                String_free(&packet_in);
                 String_free(&filename);
                 return rv;
-            } else if (strncmp(packet_in.data, "SUC", 3)) {
+            } else if (strncmp(packet_in.data, "SUC", 3) == 0) {
+                String_free(&packet_in);
                 break;
-            } else if (strncmp(packet_in.data, "ERR", 3)) {
+            } else if (strncmp(packet_in.data, "ERR", 3) == 0) {
                 printf("server error\n");
+                String_free(&packet_in);
                 String_free(&filename);
                 return 0;
             }
+            String_free(&packet_in);
         }
         printf("poll did something unexpected\n");
         return -1;
@@ -335,6 +340,65 @@ int put_file(
         }
     }
     String_free(&filename);
+    // see what packets ERR vs SUC
+
+    // including final chunk in chunk count
+    chunk_count = chunk_count + 1;
+    size_t response_count = 0;
+    while (1) {
+        if (chunk_count == response_count) {
+            break;
+        }
+        int events = poll(pfd, 1, UFTP_TIMEOUT_MS);
+        if (events == 0) {
+            printf("timed out\n");
+            return 0;
+        } else if (pfd[0].revents & POLLIN) {
+            response_count++;
+            String packet_in = String_new();
+            rv = recv_packet(pfd[0].fd, server_address, &packet_in, false);
+            if (rv < 0) {
+                String_free(&packet_in);
+                return rv;
+            } else if (strncmp(packet_in.data, "SUC", 3) == 0) {
+                char header[UFTP_HEADER_SIZE];
+                uint32_t seq_number;
+                uint32_t seq_total;
+                rv = parse_sequenced_packet(
+                    &packet_in,
+                    header,
+                    &seq_number,
+                    &seq_total,
+                    NULL
+                );
+                if (rv < 0) {
+                    String_free(&packet_in);
+                    return rv;
+                }
+                printf("SUC %i/%i\n", seq_number, seq_total);
+            } else if (strncmp(packet_in.data, "ERR", 3) == 0) {
+                char header[UFTP_HEADER_SIZE];
+                uint32_t seq_number;
+                uint32_t seq_total;
+                rv = parse_sequenced_packet(
+                    &packet_in,
+                    header,
+                    &seq_number,
+                    &seq_total,
+                    NULL
+                );
+                if (rv < 0) {
+                    String_free(&packet_in);
+                    return rv;
+                }
+                printf("ERR %i/%i\n", seq_number, seq_total);
+            }
+            String_free(&packet_in);
+        } else {
+            printf("poll did something unexpected\n");
+            return -1;
+        }
+    }
     return 0;
 }
 

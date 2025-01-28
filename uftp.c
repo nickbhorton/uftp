@@ -300,10 +300,13 @@ int parse_sequenced_packet(
     *seq_total_o =
         ntohl(String_parse_u32(packet, UFTP_HEADER_SIZE + 2 * sizeof(uint32_t))
         );
-    *payload_o = String_create(
-        packet->data + UFTP_HEADER_SIZE + 3 * sizeof(uint32_t),
-        payload_len
-    );
+    // pass NULL if you dont want the payload or if there is no payload expected
+    if (payload_o != NULL) {
+        *payload_o = String_create(
+            packet->data + UFTP_HEADER_SIZE + 3 * sizeof(uint32_t),
+            payload_len
+        );
+    }
     return 0;
 }
 
