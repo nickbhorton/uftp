@@ -1,7 +1,7 @@
 #!/bin/bash
 
-mkdir clie
-mkdir serv
+mkdir -p clie
+mkdir -p serv
 
 ./test_file_generator serv/test1.serv 128
 ./test_file_generator serv/test2.serv 512

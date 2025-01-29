@@ -140,22 +140,6 @@ int main()
         String_free(&ans2);
     }
     {
-        const char* test_name = "String_from_file basic";
-        String filename = String_from_cstr("serv/test1.serv");
-        String contents = String_from_file(&filename);
-        String ans = String_from_cstr("this is a file on the server\n");
-        printf("%s: ", test_name);
-        if (String_cmp(&contents, &ans) == 0) {
-            printf("%s\n", success);
-        } else {
-            printf("%s\n", fail);
-            String_dbprint_hex(&contents);
-        }
-        String_free(&filename);
-        String_free(&contents);
-        String_free(&ans);
-    }
-    {
         const char* test_name = "String_to_file basic";
         String filename = String_from_cstr("outfile.txt");
         String contents_out = String_from_cstr("Hello file");

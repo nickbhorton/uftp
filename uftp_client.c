@@ -429,6 +429,9 @@ int put_file(
     return 0;
 }
 
+// need to refactor alot
+int handle_command(const StringView* cmd) { return 0; }
+
 // TODO: handle dealocations on error
 int main(int argc, char** argv)
 {
@@ -474,12 +477,14 @@ int main(int argc, char** argv)
     char msg_buffer[UFTP_BUFFER_SIZE];
     memset(msg_buffer, 0, UFTP_BUFFER_SIZE);
 
+    int is_terminal = isatty(STDIN_FILENO);
+
     Address server;
     // byte count or err
     int rv;
     bool timed_out = false;
     while (1) {
-        if (!timed_out) {
+        if (!timed_out && is_terminal) {
             printf("> ");
             fflush(stdout);
         }
