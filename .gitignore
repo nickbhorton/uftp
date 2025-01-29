@@ -9,6 +9,8 @@ test_file_generator
 .clang*
 *.o
 
-# flie is a gig
-serv/test4.serv
-clie/test4.clie
+serv
+clie
+logs
+
+

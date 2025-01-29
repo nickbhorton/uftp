@@ -86,6 +86,14 @@ String String_create(const char* cstr, size_t size)
         return s;
     }
 }
+String String_create_of_size(char fill, size_t size)
+{
+    String s = {.data = malloc(size), .len = size, .cap = size};
+    for (size_t i = 0; i < size; i++) {
+        String_set(&s, i, fill);
+    }
+    return s;
+}
 
 String String_from_cstr(const char* s)
 {
@@ -221,6 +229,30 @@ void String_print(const String* s, bool with_newline)
 {
     for (size_t i = 0; i < s->len; i++) {
         printf("%c", String_get(s, i));
+    }
+    if (with_newline) {
+        printf("\n");
+    }
+}
+
+void String_printn(const String* s, size_t n, bool with_newline)
+{
+    for (size_t i = 0; i < s->len && i < n; i++) {
+        printf("%c", String_get(s, i));
+    }
+    if (with_newline) {
+        printf("\n");
+    }
+}
+
+void String_print_like_cstr(const String* s, bool with_newline)
+{
+    for (size_t i = 0; i < s->len; i++) {
+        char to_print = String_get(s, i);
+        if (to_print == '\0') {
+            break;
+        }
+        printf("%c", to_print);
     }
     if (with_newline) {
         printf("\n");

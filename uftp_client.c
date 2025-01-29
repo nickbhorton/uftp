@@ -19,39 +19,92 @@ void useage();
 
 int validate_address(int argc, char** argv);
 
-int handle_exit_response(struct pollfd* server_pollfd, Address* server_address)
+int get_address(const char* address, const char* port, Address* server_address)
 {
+    struct addrinfo serv_hints, *serv_res;
+    memset(&serv_hints, 0, sizeof(serv_hints));
+    serv_hints.ai_family = AF_INET;
+    serv_hints.ai_socktype = SOCK_DGRAM;
+
+    int ret;
+    ret = getaddrinfo(address, port, &serv_hints, &serv_res);
+
+    if (ret != 0) {
+        fprintf(
+            stderr,
+            "get_address::getaddrinfo() error: %s\n",
+            gai_strerror(ret)
+        );
+        freeaddrinfo(serv_res);
+        return -1;
+    }
+    if (serv_res == NULL) {
+        fprintf(
+            stderr,
+            "get_address() address for %s:%s was NULL\n",
+            address,
+            port
+        );
+        freeaddrinfo(serv_res);
+        return -1;
+    }
+
+    server_address->addrlen = serv_res->ai_addrlen;
+    memcpy(&server_address->addr, serv_res->ai_addr, server_address->addrlen);
+
+    freeaddrinfo(serv_res);
+    return 0;
+}
+
+int client_exit(int sockfd, Address* server_address)
+{
+    int rv = 0;
+    struct pollfd sock_pfd[1];
+    sock_pfd[0].fd = sockfd;
+    sock_pfd[0].events = POLLIN | POLLOUT;
     while (1) {
-        int num_events = poll(server_pollfd, 1, UFTP_TIMEOUT_MS);
-        if (num_events != 0 && server_pollfd[0].revents & POLLIN) {
-            String packet;
-            int bytes_recv = recv_packet(
-                server_pollfd[0].fd,
-                server_address,
-                &packet,
-                false
-            );
-            if (bytes_recv < 0) {
-                String_free(&packet);
-                return bytes_recv;
-            } else {
-                if (String_cmp_cstr(&packet, "GDB") == 0) {
-                    printf("server says goodbye!\n");
-                } else {
-                    fprintf(
-                        stderr,
-                        "handle_exit_response, strange packet found\n"
-                    );
-                }
-                String_free(&packet);
-                return 0;
+        int num_events = poll(sock_pfd, 1, UFTP_TIMEOUT_MS);
+        if (num_events < 0) {
+            int en = errno;
+            rv = num_events;
+            fprintf(stderr, "client_exit::poll() error %s\n", strerror(en));
+            break;
+        } else if (num_events == 0) {
+            fprintf(stderr, "client_exit::poll() timed out\n");
+            break;
+        }
+        if (sock_pfd[0].revents & POLLOUT) {
+            // EXT to server
+            if ((rv = send_packet(
+                     sockfd,
+                     server_address,
+                     StringView_from_cstr("EXT")
+                 )) < 0) {
+                break;
             }
-        } else {
-            fprintf(stderr, "timed out\n");
-            return 0;
+            // turn off POLLOUT event
+            sock_pfd[0].events = POLLIN;
+        }
+        if (sock_pfd[0].revents & POLLIN) {
+            String packet = String_new();
+            if ((rv = recv_packet(sockfd, server_address, &packet, false)) <
+                0) {
+                String_free(&packet);
+                break;
+            };
+            if (strncmp(packet.data, "GDB", 3) == 0) {
+                fprintf(stdout, "server says goodbye!\n");
+            } else {
+                fprintf(
+                    stderr,
+                    "client_exit(), strange packet from server found\n"
+                );
+            }
+            String_free(&packet);
+            break;
         }
     }
-    return 0;
+    return rv;
 }
 
 // TODO: request packets again if they are dropped
@@ -429,10 +482,188 @@ int put_file(
     return 0;
 }
 
-// need to refactor alot
-int handle_command(const StringView* cmd) { return 0; }
+/*
+ * returns:
+ *  <0 if error
+ *   0 if command was not executed
+ *   1 indicates program should exit
+ */
+int execute_command(int sockfd, Address* server_address, StringView cmd)
+{
+    int rv = 0;
+    if (strncmp(cmd.data, "exit", 4) == 0) {
+        rv = client_exit(sockfd, server_address);
+        if (rv < 0) {
+            return rv;
+        } else {
+            // program should finish
+            return 1;
+        }
+    }
 
-// TODO: handle dealocations on error
+    return rv;
+}
+
+int terminal_loop(int sockfd, Address* server_address)
+{
+    String terminal_input = String_create_of_size('0', UFTP_BUFFER_SIZE);
+
+    struct pollfd cin_pfd[1];
+    cin_pfd[0].fd = 0;
+    cin_pfd[0].events = POLLIN;
+
+    int rv;
+
+    bool timed_out = false;
+    while (true) {
+        if (!timed_out) {
+            printf("> ");
+            fflush(stdout);
+        }
+
+        int event_count = poll(cin_pfd, 1, UFTP_TIMEOUT_MS);
+        if (event_count == 0) {
+            timed_out = true;
+            continue;
+        } else if (event_count < 0) {
+            fprintf(stderr, "server_loop::poll() returned %i\n", event_count);
+            break;
+        }
+
+        timed_out = false;
+
+        if (cin_pfd[0].revents & POLLIN) {
+            // if read fails, exit loop
+            if ((rv = read(0, terminal_input.data, UFTP_BUFFER_SIZE)) < 0) {
+                int en = errno;
+                fprintf(
+                    stderr,
+                    "terminal_loop::read() return %i, %s\n",
+                    rv,
+                    strerror(en)
+                );
+                break;
+            }
+            // exit command given
+            if (strncmp(terminal_input.data, "exit\n", 5) == 0) {
+                rv = execute_command(
+                    sockfd,
+                    server_address,
+                    StringView_from_cstr("exit")
+                );
+                // indicates cleanly exit program
+                if (rv == 1) {
+                    rv = 0;
+                    break;
+                }
+                // indicates error
+                else if (rv < 0) {
+                    break;
+
+                }
+                // indicates not command was executed
+                else if (rv == 0) {
+                    fprintf(stderr, "server_loop() exit command did not run\n");
+                    rv = -1;
+                    break;
+                }
+            }
+
+            /*
+            else if (String_cmp_cstr(&terminal_input, "ls") == 0) {
+                rv = send_packet(
+                    bs.fd,
+                    &server_address,
+                    StringView_from_cstr("LST")
+                );
+                if (rv < 0) {
+                    String_free(&cmd);
+                    return -rv;
+                }
+                rv = handle_ls_response(&pfds[1], &server_address);
+                if (rv < 0) {
+                    String_free(&cmd);
+                    return rv;
+                }
+            } else if (String_cmpn_cstr(&cmd, "get", 3) == 0) {
+                StringVector args = StringVector_from_split(&cmd, ' ');
+                if (args.len >= 2) {
+                    String filename = String_create(
+                        StringVector_get(&args, 1)->data,
+                        StringVector_get(&args, 1)->len
+                    );
+                    rv = send_sequenced_packet(
+                        bs.fd,
+                        &server_address,
+                        "GFL",
+                        1,
+                        1,
+                        StringView_create(&filename, 0, filename.len)
+                    );
+                    if (rv < 0) {
+                        String_free(&filename);
+                        String_free(&cmd);
+                        return -rv;
+                    }
+                    rv = recieve_file(&pfds[1], &server_address, &filename);
+                    if (rv < 0) {
+                        String_free(&filename);
+                        String_free(&cmd);
+                        return rv;
+                    } else if (rv == 1) {
+                        printf("uftp_client: ");
+                        String_print(&filename, false);
+                        printf(": No such file\n");
+                    }
+                    String_free(&filename);
+                } else {
+                    printf("-uftp_client: ");
+                    printf(": usage is 'get <filename>'\n");
+                }
+                StringVector_free(&args);
+            } else if (String_cmpn_cstr(&cmd, "put", 3) == 0) {
+                StringVector args = StringVector_from_split(&cmd, ' ');
+                if (args.len >= 2) {
+                    rv = put_file(&pfds[1], &server_address, &args, &cmd);
+                    if (rv < 0) {
+                        StringVector_free(&args);
+                        String_free(&cmd);
+                        return rv;
+                    }
+                } else {
+                    printf("-uftp_client: ");
+                    printf(": usage is 'put <filename>'\n");
+                }
+                StringVector_free(&args);
+            }
+        */
+            else {
+                printf("-uftp_client: ");
+                String_print_like_cstr(&terminal_input, false);
+                printf(": command not found\n");
+            }
+        }
+    }
+
+    // clean up and check rv
+    String_free(&terminal_input);
+    if (rv < 0) {
+        return rv;
+    }
+    return 0;
+}
+
+int execute_commands(
+    int sockfd,
+    Address* server_address,
+    StringVector* commands
+)
+{
+    for (size_t i = 0; i < commands->len; i++) {
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if (validate_address(argc, argv) < 0) {
@@ -443,169 +674,49 @@ int main(int argc, char** argv)
         return -bs.fd;
     }
 
-    struct addrinfo serv_hints, *serv_res;
-    memset(&serv_hints, 0, sizeof(serv_hints));
-    serv_hints.ai_family = AF_INET;
-    serv_hints.ai_socktype = SOCK_DGRAM;
-
-    int ret;
-    ret = getaddrinfo(argv[1], argv[2], &serv_hints, &serv_res);
-
-    if (ret != 0) {
-        fprintf(stderr, "server getaddrinfo() error: %s\n", gai_strerror(ret));
-        freeaddrinfo(serv_res);
-        return 1;
-    }
-    if (serv_res == NULL) {
-        fprintf(stderr, "faild to find server address info\n");
-        freeaddrinfo(serv_res);
-        return 1;
-    }
-
-    Address server_address;
-    server_address.addrlen = serv_res->ai_addrlen;
-    memcpy(&server_address.addr, serv_res->ai_addr, server_address.addrlen);
-
-    freeaddrinfo(serv_res);
-
-    struct pollfd pfds[2];
-    pfds[0].fd = 0;
-    pfds[0].events = POLLIN;
-    pfds[1].fd = bs.fd;
-    pfds[1].events = POLLIN;
-
-    char msg_buffer[UFTP_BUFFER_SIZE];
-    memset(msg_buffer, 0, UFTP_BUFFER_SIZE);
-
-    int is_terminal = isatty(STDIN_FILENO);
-
-    Address server;
-    // byte count or err
     int rv;
-    bool timed_out = false;
-    while (1) {
-        if (!timed_out && is_terminal) {
-            printf("> ");
-            fflush(stdout);
-        }
-        int event_count = poll(pfds, 2, UFTP_TIMEOUT_MS);
-        if (event_count == 0) {
-            timed_out = true;
-            continue;
-        }
-        timed_out = false;
-        if (pfds[0].revents & POLLIN) {
-            rv = read(0, msg_buffer, sizeof(msg_buffer));
-            if (rv > 1) {
-                // -1 to remove the \n for line buffered terminal?
-                String cmd = String_create(msg_buffer, rv - 1);
-                if (String_cmp_cstr(&cmd, "ls") == 0) {
-                    rv = send_packet(
-                        bs.fd,
-                        &server_address,
-                        StringView_from_cstr("LST")
-                    );
-                    if (rv < 0) {
-                        String_free(&cmd);
-                        return -rv;
-                    }
-                    rv = handle_ls_response(&pfds[1], &server_address);
-                    if (rv < 0) {
-                        String_free(&cmd);
-                        return rv;
-                    }
-                } else if (String_cmp_cstr(&cmd, "exit") == 0) {
-                    rv = send_packet(
-                        bs.fd,
-                        &server_address,
-                        StringView_from_cstr("EXT")
-                    );
-                    if (rv < 0) {
-                        return -rv;
-                    }
-                    rv = handle_exit_response(&pfds[1], &server_address);
-                    if (rv < 0) {
-                        return -rv;
-                    }
-                    String_free(&cmd);
-                    // exit from while loop
-                    break;
-                } else if (String_cmpn_cstr(&cmd, "get", 3) == 0) {
-                    StringVector args = StringVector_from_split(&cmd, ' ');
-                    if (args.len >= 2) {
-                        String filename = String_create(
-                            StringVector_get(&args, 1)->data,
-                            StringVector_get(&args, 1)->len
-                        );
-                        rv = send_sequenced_packet(
-                            bs.fd,
-                            &server_address,
-                            "GFL",
-                            1,
-                            1,
-                            StringView_create(&filename, 0, filename.len)
-                        );
-                        if (rv < 0) {
-                            String_free(&filename);
-                            String_free(&cmd);
-                            return -rv;
-                        }
-                        rv = recieve_file(&pfds[1], &server_address, &filename);
-                        if (rv < 0) {
-                            String_free(&filename);
-                            String_free(&cmd);
-                            return rv;
-                        } else if (rv == 1) {
-                            printf("uftp_client: ");
-                            String_print(&filename, false);
-                            printf(": No such file\n");
-                        }
-                        String_free(&filename);
-                    } else {
-                        printf("-uftp_client: ");
-                        printf(": usage is 'get <filename>'\n");
-                    }
-                    StringVector_free(&args);
-                } else if (String_cmpn_cstr(&cmd, "put", 3) == 0) {
-                    StringVector args = StringVector_from_split(&cmd, ' ');
-                    if (args.len >= 2) {
-                        rv = put_file(&pfds[1], &server_address, &args, &cmd);
-                        if (rv < 0) {
-                            StringVector_free(&args);
-                            String_free(&cmd);
-                            return rv;
-                        }
-                    } else {
-                        printf("-uftp_client: ");
-                        printf(": usage is 'put <filename>'\n");
-                    }
-                    StringVector_free(&args);
-                } else {
-                    printf("-uftp_client: ");
-                    String_print(&cmd, false);
-                    printf(": command not found\n");
-                }
-                String_free(&cmd);
-            } else {
-                int read_err = errno;
-                fprintf(stderr, "read() error: %s\n", strerror(read_err));
-                close(bs.fd);
-                return 1;
-            }
-        } else if (pfds[1].revents & POLLIN) {
-            String packet;
-            rv = recv_packet(pfds[1].fd, &server, &packet, false);
-            if (rv > 0) {
-                String_dbprint_hex(&packet);
-                String_free(&packet);
-            } else {
-                String_free(&packet);
-                return 1;
-            }
-            memset(msg_buffer, 0, sizeof(msg_buffer));
-        }
+    Address server_address;
+    if ((rv = get_address(argv[1], argv[2], &server_address) < 0)) {
+        return -rv;
     }
-    close(bs.fd);
+
+    if (isatty(STDIN_FILENO)) {
+        if ((rv = terminal_loop(bs.fd, &server_address)) < 0) {
+            return -rv;
+        };
+    } else {
+        String cin_input = String_create_of_size('\0', UFTP_BUFFER_SIZE);
+        if ((rv = read(0, cin_input.data, UFTP_BUFFER_SIZE)) < 0) {
+            int en = errno;
+            fprintf(stderr, "read() error %s\n", strerror(en));
+            String_free(&cin_input);
+            return -rv;
+        }
+        StringVector commands = StringVector_from_split(&cin_input, ';');
+        for (size_t i = 0; i < commands.len; i++) {
+            String* command = &commands.data[i];
+            rv = execute_command(
+                bs.fd,
+                &server_address,
+                StringView_create(command, 0, command->len)
+            );
+            // indicates error
+            if (rv < 0) {
+                fprintf(stderr, "execute_command error\n");
+                break;
+            } else if (rv == 1) {
+                rv = 0;
+                break;
+            }
+        }
+        if (rv < 0) {
+            StringVector_free(&commands);
+            String_free(&cin_input);
+            return -rv;
+        }
+        StringVector_free(&commands);
+        String_free(&cin_input);
+    }
     return 0;
 }
 

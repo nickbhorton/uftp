@@ -19,7 +19,11 @@ UdpBoundSocket get_udp_socket(const char* addr, const char* port)
     int ret;
     ret = getaddrinfo(addr, port, &hints, &address_info);
     if (ret != 0) {
-        fprintf(stderr, "getaddrinfo() error: %s\n", gai_strerror(ret));
+        fprintf(
+            stderr,
+            "get_udp_socket::getaddrinfo() error: %s\n",
+            gai_strerror(ret)
+        );
 
         // error value goes into sockfd of bound_sock
         memset(&bound_sock, 0, sizeof(bound_sock));
@@ -34,7 +38,11 @@ UdpBoundSocket get_udp_socket(const char* addr, const char* port)
                  socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol)) <
             0) {
             int sock_err = errno;
-            fprintf(stderr, "socket() error: %s\n", strerror(sock_err));
+            fprintf(
+                stderr,
+                "get_udp_socket::socket() error: %s\n",
+                strerror(sock_err)
+            );
             continue; // next loop
         }
         if ((bind(bound_sock.fd, ptr->ai_addr, ptr->ai_addrlen)) < 0) {
@@ -54,7 +62,7 @@ UdpBoundSocket get_udp_socket(const char* addr, const char* port)
             );
             fprintf(
                 stderr,
-                "failed to bind() to %s: %s\n",
+                "get_udp_socket() failed to bind() to %s: %s\n",
                 strerror(sock_err),
                 failed_addr
             );
@@ -64,7 +72,7 @@ UdpBoundSocket get_udp_socket(const char* addr, const char* port)
     }
 
     if (ptr == NULL) {
-        fprintf(stderr, "failed to find and bind a socket");
+        fprintf(stderr, "get_udp_socket() failed to find and bind a socket");
 
         // error value goes into sockfd of bound_sock
         memset(&bound_sock, 0, sizeof(bound_sock));
@@ -84,14 +92,6 @@ UdpBoundSocket get_udp_socket(const char* addr, const char* port)
         success_addr,
         sizeof(success_addr)
     );
-    if (UFTP_DEBUG) {
-        fprintf(
-            stdout,
-            "bound to address %s:%u\n",
-            success_addr,
-            Address_port(&bound_sock.address)
-        );
-    }
 
     freeaddrinfo(address_info);
 
@@ -100,7 +100,11 @@ UdpBoundSocket get_udp_socket(const char* addr, const char* port)
     if (setsockopt(bound_sock.fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) <
         0) {
         int sock_err = errno;
-        fprintf(stderr, "socket() error: %s\n", strerror(sock_err));
+        fprintf(
+            stderr,
+            "get_udp_socket::socket() error: %s\n",
+            strerror(sock_err)
+        );
         close(bound_sock.fd);
 
         // error value goes into sockfd of bound_sock

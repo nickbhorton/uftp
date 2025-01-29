@@ -56,6 +56,8 @@ int main(int argc, char** argv)
         StringVector_free(&filenames);
         return 1;
     }
+    if (UFTP_DEBUG) {
+    }
 
     if (server_loop(&bs, &filenames) < 0) {
         close(bs.fd);

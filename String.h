@@ -15,6 +15,7 @@ typedef struct {
 
 String String_new();
 String String_create(const char* arr, size_t size);
+String String_create_of_size(char fill, size_t size);
 
 void String_push_back(String* s, char c);
 
@@ -48,6 +49,8 @@ int String_cmp_cstr(const String* s1, const char* cstring);
 int String_cmpn_cstr(const String* s1, const char* cstring, size_t n);
 
 void String_print(const String* s, bool with_newline);
+void String_printn(const String* s, size_t n, bool with_newline);
+void String_print_like_cstr(const String* s, bool with_newline);
 void String_dbprint(const String* s);
 void String_dbprint_hex(const String* s);
 
