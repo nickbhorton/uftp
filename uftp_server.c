@@ -359,7 +359,17 @@ int handle_FLQ(
             return rv;
         }
     }
-    if (seq_total < 8 || seq_number % 1000 == 0 || seq_number == seq_total) {
+    static size_t seq_number_saved = 0;
+    if (seq_number_saved + 1 != seq_number) {
+        printf(
+            "non sequential packet detected %zu/%i\n",
+            seq_number_saved,
+            seq_total
+        );
+    }
+    seq_number_saved = seq_number;
+
+    if (seq_total < 8) {
         printf("successful write of ");
         String_print(&client->writing_filename, false);
         printf(

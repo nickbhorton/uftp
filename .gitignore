@@ -3,7 +3,8 @@ uftp_client
 
 String_test
 StringVector_test
-fileio_test
+
+test_file_generator
 
 .clang*
 *.o
