@@ -176,6 +176,91 @@ int handle_ls_response(struct pollfd* server_pollfd, Address* server_address)
     return 0;
 }
 
+int client_ls(int sockfd, Address* server_address)
+{
+    size_t filenames_recv = 0;
+
+    int rv = 0;
+    struct pollfd sock_pfd[1];
+    sock_pfd[0].fd = sockfd;
+    sock_pfd[0].events = POLLIN | POLLOUT;
+    while (1) {
+        int num_events = poll(sock_pfd, 1, UFTP_TIMEOUT_MS);
+        if (num_events < 0) {
+            int en = errno;
+            rv = num_events;
+            fprintf(stderr, "client_ls::poll() error %s\n", strerror(en));
+            break;
+        } else if (num_events == 0) {
+            fprintf(stderr, "client_ls::poll() timed out\n");
+            break;
+        }
+        if (sock_pfd[0].revents & POLLOUT) {
+            // LST to server
+            if ((rv = send_packet(
+                     sockfd,
+                     server_address,
+                     StringView_from_cstr("LST")
+                 )) < 0) {
+                break;
+            }
+            // turn off POLLOUT event
+            sock_pfd[0].events = POLLIN;
+        }
+        if (sock_pfd[0].revents & POLLIN) {
+            String packet = String_new();
+            if ((rv = recv_packet(sockfd, server_address, &packet, false)) <
+                0) {
+                String_free(&packet);
+                break;
+            };
+            if (strncmp(packet.data, "LSQ", 3) == 0) {
+                char header[UFTP_HEADER_SIZE];
+                uint32_t seq_number;
+                uint32_t seq_total;
+                String payload;
+                rv = parse_sequenced_packet(
+                    &packet,
+                    header,
+                    &seq_number,
+                    &seq_total,
+                    &payload
+                );
+                if (rv < 0) {
+                    String_free(&packet);
+                    String_free(&payload);
+                    break;
+                }
+                filenames_recv++;
+
+                // print filename to stdout
+                String_print(&payload, false);
+                if (filenames_recv != seq_total) {
+                    printf(" ");
+                } else {
+                    printf("\n");
+                }
+
+                String_free(&packet);
+                String_free(&payload);
+
+                // check if we have recv enough filenames
+                if (filenames_recv == seq_total) {
+                    break;
+                }
+            } else {
+                fprintf(
+                    stderr,
+                    "client_ls(), strange packet from server found\n"
+                );
+                String_free(&packet);
+                break;
+            }
+        }
+    }
+    return rv;
+}
+
 // TODO: request dropped packets
 int recieve_file(
     struct pollfd* sock_poll,
@@ -493,6 +578,15 @@ int execute_command(int sockfd, Address* server_address, StringView cmd)
     int rv = 0;
     if (cmd.len == 4 && strncmp(cmd.data, "exit", 4) == 0) {
         rv = client_exit(sockfd, server_address);
+        if (rv < 0) {
+            return rv;
+        } else {
+            // program should finish
+            return 1;
+        }
+    }
+    if (cmd.len == 2 && strncmp(cmd.data, "ls", 2) == 0) {
+        rv = client_ls(sockfd, server_address);
         if (rv < 0) {
             return rv;
         } else {
