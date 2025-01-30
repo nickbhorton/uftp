@@ -1,9 +1,10 @@
 CC=gcc
 CFLAGS=-g3 -Wall -Werror -fsanitize=address
 
-all: uftp_server uftp_client test_file_generator String_test StringVector_test
+all: uftp_server uftp_client test_file_generator String_test StringVector_test logs
 
-test_file_generator: test_file_generator.c
+
+uftp_server_extras.o: uftp_server.h
 
 String.o: String.h
 
@@ -22,25 +23,36 @@ uftp_client: uftp_client.c uftp.o String.o StringVector.o debug_macros.o
 uftp_server: uftp_server.o String.o StringVector.o uftp_server_extras.o uftp.o debug_macros.o
 	$(CC) -o $@ $^ $(CFLAGS)
 
-uftp_server_extras.o: uftp_server.h
+test_file_generator: test_file_generator.c
+
+serv/test1.serv:
+	./scripts/gen_tests.bash
+
+logs:
+	mkdir -p logs
+
+test_String: String_test 
+	@echo -e "\x1b[33mString tests:\x1b[0m"
+	@./String_test
+
+test_StringVector: StringVector_test
+	@echo -e "\x1b[33mStringVector tests:\x1b[0m"
+	@./StringVector_test
 
 clean:
 	rm -f uftp_server
 	rm -f uftp_client
 	rm -f String_test 
 	rm -f StringVector_test
+	rm -f test_file_generator
 	rm -rf serv
 	rm -rf clie 
-	rm *.o
+	rm -rf logs
+	rm -f *.o
 
-test: all
-	@./scripts/gen_tests.bash
-	@echo -e "\x1b[33mString tests:\x1b[0m"
-	@./String_test
-	@echo -e "\x1b[33mStringVector tests:\x1b[0m"
-	@./StringVector_test
+test: all serv/test1.serv test_String test_StringVector
 	@echo -e "\x1b[33mIntegration tests:\x1b[0m"
 	@./scripts/test.bash
 
 
-.PHONY: clean test all
+.PHONY: clean test all test_String test_StringVector

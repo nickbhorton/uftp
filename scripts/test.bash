@@ -15,8 +15,9 @@ cd ..
 # sleep 0.1
 ps -e | grep uftp_server > /dev/null
 
-./scripts/exit.bash
 ./scripts/improper_command.bash
+./scripts/nonterm_command.bash
+./scripts/exit.bash
 ./scripts/ls.bash
 
 # kill the server for cleanup

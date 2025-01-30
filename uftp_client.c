@@ -491,7 +491,7 @@ int put_file(
 int execute_command(int sockfd, Address* server_address, StringView cmd)
 {
     int rv = 0;
-    if (strncmp(cmd.data, "exit", 4) == 0) {
+    if (cmd.len == 4 && strncmp(cmd.data, "exit", 4) == 0) {
         rv = client_exit(sockfd, server_address);
         if (rv < 0) {
             return rv;
@@ -683,7 +683,11 @@ int main(int argc, char** argv)
             return -rv;
         }
         StringVector commands = StringVector_from_split(&cin_input, ';');
-        for (size_t i = 0; i < commands.len; i++) {
+        if (commands.len == 1) {
+            fprintf(stderr, "command missing a ';'\n");
+            return 1;
+        }
+        for (int i = 0; i < (int)(commands.len) - 1; i++) {
             String* command = &commands.data[i];
             rv = execute_command(
                 bs.fd,

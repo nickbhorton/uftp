@@ -4,7 +4,7 @@
 source ./scripts/common.bash
 
 TEST_NAME='client ls'
-TEST_CMD='ls'
+TEST_CMD='ls;'
 
 # test
 echo "test1.serv test2.serv test3.serv test4.serv test5.serv" > expected.out

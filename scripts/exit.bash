@@ -4,7 +4,7 @@
 source ./scripts/common.bash
 
 TEST_NAME='client exit'
-TEST_CMD='exit'
+TEST_CMD='exit;'
 
 # test
 echo "server says goodbye!" > expected.out

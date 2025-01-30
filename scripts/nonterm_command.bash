@@ -3,8 +3,8 @@
 
 source ./scripts/common.bash
 
-TEST_NAME='improper command'
-TEST_CMD='ext;'
+TEST_NAME='nonterm command'
+TEST_CMD='exit'
 
 # test
 echo -n "${TEST_CMD}" | ./uftp_client 127.0.0.1 5000 > /dev/null 2>&1
