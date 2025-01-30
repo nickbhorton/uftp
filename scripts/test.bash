@@ -1,6 +1,10 @@
 #!/bin/bash
 # relative paths are specified from the uftp dir!
 
+source ./scripts/common.bash
+
+echo -e -n "${TERM_CLR}"
+
 # mount server in serv and put in background
 cd serv
 ../uftp_server 5000 1> ../logs/serv.cout 2> ../logs/serv.cerr &
@@ -13,6 +17,7 @@ ps -e | grep uftp_server > /dev/null
 
 ./scripts/exit.bash
 ./scripts/improper_command.bash
+./scripts/ls.bash
 
 # kill the server for cleanup
 kill -INT $SERVER_PID

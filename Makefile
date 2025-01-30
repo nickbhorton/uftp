@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-g3 -Wall -Werror -fsanitize=address
 
-all: uftp_server uftp_client test_file_generator
+all: uftp_server uftp_client test_file_generator String_test StringVector_test
 
 test_file_generator: test_file_generator.c
 
@@ -33,7 +33,7 @@ clean:
 	rm -rf clie 
 	rm *.o
 
-test: String_test StringVector_test
+test: all
 	@./scripts/gen_tests.bash
 	@echo -e "\x1b[33mString tests:\x1b[0m"
 	@./String_test
@@ -43,4 +43,4 @@ test: String_test StringVector_test
 	@./scripts/test.bash
 
 
-.PHONY: clean test
+.PHONY: clean test all

@@ -3,12 +3,13 @@
 
 source ./scripts/common.bash
 
-TEST_NAME='client exit'
-TEST_CMD='exit'
+TEST_NAME='client ls'
+TEST_CMD='ls'
 
 # test
-echo "server says goodbye!" > expected.out
+echo "test1.serv test2.serv test3.serv test4.serv test5.serv" > expected.out
 echo -n "${TEST_CMD}" | ./uftp_client 127.0.0.1 5000 1> clie.stdout 2> clie.stderr
+
 CLIENT_EXT=$?
 if [ $CLIENT_EXT != 0 ]; then
     echo -e "${TEST_NAME}: ${TERM_RED}fail${TERM_CLR} client did not return 0"
