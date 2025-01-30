@@ -1,5 +1,6 @@
 #include "uftp_server.h"
 #include <assert.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,7 @@
 
 #include "String.h"
 #include "StringVector.h"
+#include "debug_macros.h"
 #include "uftp.h"
 
 int server_loop(UdpBoundSocket* bs, StringVector* filenames);
@@ -34,12 +36,20 @@ int send_file(
     const StringVector* valid_filenames
 );
 
+void term_handle(int signum);
 void useage();
 int validate_port(int argc, char** argv);
 void print_input(Client* client, String* packet);
 
 int main(int argc, char** argv)
 {
+    if (signal(SIGINT, &term_handle) == SIG_ERR) {
+        fprintf(stderr, "signal for termination failed to be set\n");
+    }
+    if (signal(SIGTERM, &term_handle) == SIG_ERR) {
+        fprintf(stderr, "signal for termination failed to be set\n");
+    }
+
     if (validate_port(argc, argv) < 0) {
         return 1;
     }
@@ -56,7 +66,21 @@ int main(int argc, char** argv)
         StringVector_free(&filenames);
         return 1;
     }
+
     if (UFTP_DEBUG) {
+        char bound_address[INET6_ADDRSTRLEN];
+        memset(&bound_address, 0, sizeof(bound_address));
+        inet_ntop(
+            bs.address.addr.ss_family,
+            Address_in_addr(&bs.address),
+            bound_address,
+            sizeof(bound_address)
+        );
+        UFTP_DEBUG_MSG(
+            "server at %s:%i\n",
+            bound_address,
+            Address_port(&bs.address)
+        );
     }
 
     if (server_loop(&bs, &filenames) < 0) {
@@ -89,7 +113,7 @@ int server_loop(UdpBoundSocket* bs, StringVector* filenames)
                 String packet_in = String_new();
                 rv = recv_packet(pfds[0].fd, &client, &packet_in, false);
                 if (rv < 0 && UFTP_DEBUG) {
-                    fprintf(stderr, "packet recv failed\n");
+                    UFTP_DEBUG_ERR("packet recv failed\n");
                 } else {
                     Client* current_client =
                         get_client(&cl, &client.addr, client.addrlen);
@@ -547,6 +571,19 @@ void print_input(Client* client, String* packet)
         printf("%s:%u(%zu):\n", client_address_string, portnum, packet->len);
         String_dbprint_hex(packet);
     }
+}
+
+void term_handle(int signum)
+{
+    if (signum == SIGINT) {
+        UFTP_DEBUG_ERR("SIGINT\n");
+    } else if (signum == SIGTERM) {
+        UFTP_DEBUG_ERR("SIGTERM\n");
+    }
+    fflush(stdout);
+    fflush(stderr);
+    // TODO something else here
+    exit(1);
 }
 
 int validate_port(int argc, char** argv)

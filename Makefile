@@ -17,9 +17,9 @@ String_test: String_test.c String.o
 
 StringVector_test: StringVector_test.c String.o StringVector.o
 
-uftp_client: uftp_client.c uftp.o String.o StringVector.o
+uftp_client: uftp_client.c uftp.o String.o StringVector.o debug_macros.o
 
-uftp_server: uftp_server.o String.o StringVector.o uftp_server_extras.o uftp.o
+uftp_server: uftp_server.o String.o StringVector.o uftp_server_extras.o uftp.o debug_macros.o
 	$(CC) -o $@ $^ $(CFLAGS)
 
 uftp_server_extras.o: uftp_server.h

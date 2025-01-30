@@ -86,6 +86,7 @@ typedef struct {
 StringView
 StringView_create(const String* s, size_t start_inc, size_t end_ninc);
 StringView StringView_from_cstr(const char* data);
+void StringView_fprint(const StringView* sv, FILE* stream, bool with_newline);
 
 void String_push_sv(String* to, StringView from);
 

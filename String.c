@@ -447,3 +447,13 @@ void String_push_sv(String* to, StringView from)
 {
     String_insertn(to, (char*)from.data, to->len, from.len);
 }
+
+void StringView_fprint(const StringView* sv, FILE* stream, bool with_newline)
+{
+    for (size_t i = 0; i < sv->len; i++) {
+        fprintf(stream, "%c", sv->data[i]);
+    }
+    if (with_newline) {
+        fprintf(stream, "\n");
+    }
+}

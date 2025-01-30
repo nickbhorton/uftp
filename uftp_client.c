@@ -499,9 +499,12 @@ int execute_command(int sockfd, Address* server_address, StringView cmd)
             // program should finish
             return 1;
         }
+    } else {
+        fprintf(stderr, "'");
+        StringView_fprint(&cmd, stderr, false);
+        fprintf(stderr, "' not a valid command\n");
+        return 0;
     }
-
-    return rv;
 }
 
 int terminal_loop(int sockfd, Address* server_address)
@@ -556,15 +559,13 @@ int terminal_loop(int sockfd, Address* server_address)
                     rv = 0;
                     break;
                 }
+                // command not executed
+                else if (rv == 0) {
+                    rv = -1;
+                    break;
+                }
                 // indicates error
                 else if (rv < 0) {
-                    break;
-
-                }
-                // indicates not command was executed
-                else if (rv == 0) {
-                    fprintf(stderr, "server_loop() exit command did not run\n");
-                    rv = -1;
                     break;
                 }
             }
@@ -653,17 +654,6 @@ int terminal_loop(int sockfd, Address* server_address)
     return 0;
 }
 
-int execute_commands(
-    int sockfd,
-    Address* server_address,
-    StringVector* commands
-)
-{
-    for (size_t i = 0; i < commands->len; i++) {
-    }
-    return 0;
-}
-
 int main(int argc, char** argv)
 {
     if (validate_address(argc, argv) < 0) {
@@ -702,7 +692,11 @@ int main(int argc, char** argv)
             );
             // indicates error
             if (rv < 0) {
-                fprintf(stderr, "execute_command error\n");
+                break;
+            }
+            // indicates no command executed
+            else if (rv == 0) {
+                rv = -1;
                 break;
             } else if (rv == 1) {
                 rv = 0;
