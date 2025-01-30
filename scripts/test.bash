@@ -19,6 +19,7 @@ ps -e | grep uftp_server > /dev/null
 ./scripts/nonterm_command.bash
 ./scripts/exit.bash
 ./scripts/ls.bash
+./scripts/put1.bash
 
 # kill the server for cleanup
 kill -INT $SERVER_PID
