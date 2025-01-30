@@ -7,12 +7,16 @@ cd serv
 SERVER_PID=$!
 cd ..
 
-echo "sleep 0.5 second"
-sleep 0.5
-ps -e | grep uftp_server
+# to ensure the sever is set up wait for a bit
+# sleep 0.1
+ps -e | grep uftp_server > /dev/null
 
-./scripts/client_exit.bash
+./scripts/exit.bash
+./scripts/improper_command.bash
 
 # kill the server for cleanup
-echo "kill server $SERVER_PID"
 kill -INT $SERVER_PID
+KILL_EXT=$?
+if [ $KILL_EXT != 0 ]; then
+    echo "kill server failed for $SERVER_PID"
+fi

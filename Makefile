@@ -35,10 +35,12 @@ clean:
 
 test: String_test StringVector_test
 	@./scripts/gen_tests.bash
-	@echo -e "\x1b[33mString test:\x1b[0m"
+	@echo -e "\x1b[33mString tests:\x1b[0m"
 	@./String_test
-	@echo -e "\x1b[33mStringVector test:\x1b[0m"
+	@echo -e "\x1b[33mStringVector tests:\x1b[0m"
 	@./StringVector_test
+	@echo -e "\x1b[33mIntegration tests:\x1b[0m"
+	@./scripts/test.bash
 
 
 .PHONY: clean test
