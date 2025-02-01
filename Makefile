@@ -1,40 +1,26 @@
 CC=gcc
 CFLAGS=-g3 -Wall -Werror -fsanitize=address
 
-all: uftp_server uftp_client test_file_generator String_test StringVector_test logs snd
+all: server client test_file_generator String_test StringVector_test logs uftp2_test
 
-# snd version 
-snd: uftp2_test
+# string stuff
+String.o: String.h
+StringVector.o : StringVector.h
+String_test: String_test.c String.o
+StringVector_test: StringVector_test.c String.o StringVector.o
 
 uftp2_test: testing.c uftp2.c debug_macros.c String.o
 	$(CC) -o $@ $^ $(CFLAGS) -DTESTING
 
 uftp2.o: uftp2.c uftp2.h
-# end snd verison
 
-uftp_server_extras.o: uftp_server.h
+server: uftp_server2.c uftp2.o debug_macros.o String.o
+	$(CC) -o $@ $^ $(CFLAGS)
 
-String.o: String.h
-
-StringVector.o : StringVector.h
-
-uftp.o: uftp.h
-
-uftp_server.o: uftp_server.h
-
-String_test: String_test.c String.o
-
-StringVector_test: StringVector_test.c String.o StringVector.o
-
-uftp_client: uftp_client.c uftp.o String.o StringVector.o debug_macros.o
-
-uftp_server: uftp_server.o String.o StringVector.o uftp_server_extras.o uftp.o debug_macros.o
+client: uftp_client2.c uftp2.o debug_macros.o String.o
 	$(CC) -o $@ $^ $(CFLAGS)
 
 test_file_generator: test_file_generator.c
-
-serv/test1.serv:
-	./scripts/gen_tests.bash
 
 logs:
 	mkdir -p logs
@@ -48,8 +34,8 @@ test_StringVector: StringVector_test
 	@./StringVector_test
 
 clean:
-	rm -f uftp_server
-	rm -f uftp_client
+	rm -f server
+	rm -f client
 	rm -f String_test 
 	rm -f StringVector_test
 	rm -f uftp2_test 

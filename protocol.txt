@@ -23,6 +23,8 @@ Functions:
 0-255: Success codes
 0: operation completed successfully
 256-511: Error codes
+256: server error
+257: server unknown function
 
 512: client exit
     server gives a 0

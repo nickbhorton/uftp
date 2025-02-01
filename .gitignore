@@ -1,5 +1,5 @@
-uftp_server
-uftp_client
+server
+client
 
 String_test
 StringVector_test
@@ -16,3 +16,4 @@ logs
 .cache
 compile_commands.json
 
+uftp2_test

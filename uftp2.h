@@ -21,8 +21,13 @@ extern int UFTP_TIMEOUT_MS;
 #define UFTP_PROTOCOL_VERSION 1
 
 // functions for packets
-#define CLIEXT 512
-#define CLILS 513
+#define CLIE_EXT 512
+#define CLIE_LS 513
+
+#define SERV_SUC 0
+
+#define SERV_ERR 256
+#define SERV_UNKNOWN_FUNC 257
 
 typedef struct __attribute__((packed)) {
     uint32_t packet_length;
@@ -58,6 +63,15 @@ int send_packet(
     const Address* to,
     const PacketHeaderSend head,
     const StringView payload
+);
+int send_func_only(int sockfd, const Address* to, uint32_t function);
+int send_seq(
+    int sockfd,
+    const Address* to,
+    uint32_t function,
+    uint32_t sequence_number,
+    uint32_t sequence_total,
+    const StringView sv
 );
 
 // returns:

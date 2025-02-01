@@ -81,6 +81,30 @@ int send_packet(
     return total_bytes_sent;
 }
 
+int send_func_only(int sockfd, const Address* to, uint32_t function)
+{
+    PacketHeaderSend head =
+        {.function = function, .sequence_number = 1, .sequence_total = 1};
+    StringView sv = {.data = NULL, .len = 0};
+    return send_packet(sockfd, to, head, sv);
+}
+int send_seq(
+    int sockfd,
+    const Address* to,
+    uint32_t function,
+    uint32_t sequence_number,
+    uint32_t sequence_total,
+    const StringView sv
+)
+{
+    PacketHeaderSend head = {
+        .function = function,
+        .sequence_number = sequence_number,
+        .sequence_total = sequence_total
+    };
+    return send_packet(sockfd, to, head, sv);
+}
+
 int recv_packet(
     int sockfd,
     Address* from,
@@ -110,7 +134,7 @@ int recv_packet(
             UFTP_DEBUG_ERR("recv_packet::poll() errno %i\n", en);
             return -1;
         } else if (number_events == 0) {
-            UFTP_DEBUG_MSG("recv_packet::poll() timeout\n");
+            // UFTP_DEBUG_MSG("recv_packet::poll() timeout\n");
             return 0;
         } else if (!(pfd[0].revents & POLLIN)) {
             UFTP_DEBUG_ERR("recv_packet::poll() returned unwanted event\n");
