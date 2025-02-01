@@ -21,19 +21,32 @@
 
 #define UFTP_SEQ_PROTOCOL_SIZE (UFTP_HEADER_SIZE + 3 * sizeof(uint32_t))
 
+// functions for packets
+#define CLIEXT 512
+#define CLILS 513
+
+typedef struct {
+    uint32_t packet_length;
+    uint16_t version;
+    uint32_t sequence_number;
+    uint32_t sequence_total;
+    uint16_t function;
+} PacketHeader;
+
 typedef struct {
     struct sockaddr_storage addr;
     socklen_t addrlen;
 } Address;
 
-struct sockaddr* Address_sockaddr(const Address* a);
-void* Address_in_addr(const Address* a);
-uint16_t Address_port(const Address* a);
-
 typedef struct {
     int fd;
     Address address;
 } UdpBoundSocket;
+
+struct sockaddr* Address_sockaddr(const Address* a);
+void* Address_in_addr(const Address* a);
+uint16_t Address_port(const Address* a);
+
 
 UdpBoundSocket get_udp_socket(const char* addr, const char* port);
 

@@ -3,6 +3,14 @@ CFLAGS=-g3 -Wall -Werror -fsanitize=address
 
 all: uftp_server uftp_client test_file_generator String_test StringVector_test logs
 
+# snd version 
+snd: uftp2_test
+
+uftp2_test: testing.c uftp2.o debug_macros.o String.o
+	$(CC) -o $@ $^ $(CFLAGS)
+
+uftp2.o: uftp2.c uftp2.h
+# end snd verison
 
 uftp_server_extras.o: uftp_server.h
 
@@ -44,6 +52,7 @@ clean:
 	rm -f uftp_client
 	rm -f String_test 
 	rm -f StringVector_test
+	rm -f uftp2_test 
 	rm -f test_file_generator
 	rm -rf serv
 	rm -rf clie 
@@ -55,4 +64,4 @@ test: all serv/test1.serv test_String test_StringVector
 	@./scripts/test.bash
 
 
-.PHONY: clean test all test_String test_StringVector
+.PHONY: clean test all test_String test_StringVector snd

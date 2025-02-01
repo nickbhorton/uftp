@@ -1,0 +1,30 @@
+Every Packet:
+uint32_t packet_length
+uint16_t version
+uint32_t sequence_number
+uint32_t sequence_total
+uint16_t function
+char* payload
+
+Server Side:
+
+The server is "not smart" it is the clients job to ensure the correct data gets
+to the server. When the server receives a packet it will (potentially) change something on
+the server and or answer a question.
+
+The server has one internal state values.
+1. A working filename it can read or write too.
+It is the clients job to understand if that working filename is correct in
+general and is correct in specific. The server will report errors and will
+(hopefully) not segfault because of bad input but ultimately the client is in
+control of what is happening on the server. 
+
+Functions:
+0-255: Success codes
+0: operation completed successfully
+256-511: Error codes
+
+512: client exit
+    server gives a 0
+513: client ls
+    server packs ls in mount dir into n number of packets
