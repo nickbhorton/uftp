@@ -13,4 +13,6 @@ serv
 clie
 logs
 
+.cache
+compile_commands.json
 

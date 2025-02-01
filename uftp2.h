@@ -2,17 +2,21 @@
 #define UFTP_HEADER
 
 #include <arpa/inet.h>
-#include <errno.h>
 #include <netdb.h>
-#include <stdio.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include "String.h"
 
+#ifdef TESTING
+extern int UFTP_DEBUG;
+extern int UFTP_TIMEOUT_MS;
+#else
+#define UFTP_DEBUG 1
 #define UFTP_TIMEOUT_MS 1000
+#endif
+
 #define UFTP_BUFFER_SIZE 1024
 #define UFTP_PROTOCOL_VERSION 1
 
@@ -31,7 +35,7 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint32_t sequence_number;
     uint32_t sequence_total;
-    uint16_t function;
+    uint32_t function;
 } PacketHeaderSend;
 
 #define UFTP_PAYLOAD_MAX_SIZE (UFTP_BUFFER_SIZE - sizeof(PacketHeader))

@@ -1,7 +1,13 @@
 #include "uftp2.h"
+
 #include "debug_macros.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/socket.h>
 
 int send_packet(
     int sockfd,
@@ -21,6 +27,12 @@ int send_packet(
         .sequence_total = htonl(head.sequence_total),
         .function = htonl(head.function)
     };
+    if (ntohl(head_n.packet_length) > UFTP_BUFFER_SIZE) {
+        UFTP_DEBUG_MSG(
+            "send_packet() sending a packet larger than buffer size %i\n",
+            ntohl(head_n.packet_length)
+        );
+    }
 
     unsigned int total_bytes_sent = 0;
     unsigned int bytes_to_send = payload.len + sizeof(PacketHeader);
@@ -99,7 +111,7 @@ int recv_packet(
             return -1;
         } else if (number_events == 0) {
             UFTP_DEBUG_MSG("recv_packet::poll() timeout\n");
-            return total_bytes_recv;
+            return 0;
         } else if (!(pfd[0].revents & POLLIN)) {
             UFTP_DEBUG_ERR("recv_packet::poll() returned unwanted event\n");
             return -1;
@@ -107,8 +119,8 @@ int recv_packet(
         from->addrlen = sizeof(from->addr);
         rv = recvfrom(
             sockfd,
-            buffer + total_bytes_recv,
-            UFTP_BUFFER_SIZE - total_bytes_recv,
+            buffer + (total_bytes_recv % UFTP_BUFFER_SIZE),
+            UFTP_BUFFER_SIZE - (total_bytes_recv % UFTP_BUFFER_SIZE),
             0,
             Address_sockaddr(from),
             &from->addrlen
@@ -124,7 +136,66 @@ int recv_packet(
         if (!parsed_packet_length && total_bytes_recv >= sizeof(uint32_t)) {
             header_o->packet_length = ntohl(*((uint32_t*)buffer));
             if (header_o->packet_length > UFTP_BUFFER_SIZE) {
-                UFTP_DEBUG_ERR("recv_packet() packet larger than buffer\n");
+                UFTP_DEBUG_ERR(
+                    "recv_packet() packet larger than buffer %u\n",
+                    header_o->packet_length
+                );
+                // clear the socket just in case the data that would overflow
+                // the buffer actually was sent.
+                // 1. set non blocking mode.
+                rv = fcntl(sockfd, F_GETFL, 0);
+                if (rv < 0) {
+                    int en = errno;
+                    UFTP_DEBUG_ERR("recv_packet::fcntl() get errno %i\n", en);
+                    return -1;
+                }
+                rv |= O_NONBLOCK;
+                rv = fcntl(sockfd, F_SETFL, rv);
+                if (rv < 0) {
+                    int en = errno;
+                    UFTP_DEBUG_ERR("recv_packet::fcntl() set errno %i\n", en);
+                    return -1;
+                }
+                // 2. call recvfrom until would block
+                while (1) {
+                    rv = recvfrom(
+                        sockfd,
+                        buffer,
+                        UFTP_BUFFER_SIZE,
+                        0,
+                        Address_sockaddr(from),
+                        &from->addrlen
+                    );
+                    if (rv < 0) {
+                        if (errno == EWOULDBLOCK) {
+                            break;
+                        }
+                        int en = errno;
+                        UFTP_DEBUG_ERR(
+                            "recv_packet::recvfrom() when clearing socket "
+                            "errno %i\n",
+                            en
+                        );
+                        return -1;
+                    }
+                }
+                // just in case we actually got stuff
+                memset(buffer, 0, UFTP_BUFFER_SIZE);
+                // 3. set back to blocking mode
+                rv = fcntl(sockfd, F_GETFL, 0);
+                if (rv < 0) {
+                    int en = errno;
+                    UFTP_DEBUG_ERR("recv_packet::fcntl() get errno %i\n", en);
+                    return -1;
+                }
+                rv &= ~O_NONBLOCK;
+                rv = fcntl(sockfd, F_SETFL, rv);
+                if (rv < 0) {
+                    int en = errno;
+                    UFTP_DEBUG_ERR("recv_packet::fcntl() set errno %i\n", en);
+                    return -1;
+                }
+                // 4. now that we have cleared the socket return error code.
                 return -1;
             }
             parsed_packet_length = true;

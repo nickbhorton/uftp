@@ -1,13 +1,13 @@
 CC=gcc
 CFLAGS=-g3 -Wall -Werror -fsanitize=address
 
-all: uftp_server uftp_client test_file_generator String_test StringVector_test logs
+all: uftp_server uftp_client test_file_generator String_test StringVector_test logs snd
 
 # snd version 
 snd: uftp2_test
 
-uftp2_test: testing.c uftp2.o debug_macros.o String.o
-	$(CC) -o $@ $^ $(CFLAGS)
+uftp2_test: testing.c uftp2.c debug_macros.c String.o
+	$(CC) -o $@ $^ $(CFLAGS) -DTESTING
 
 uftp2.o: uftp2.c uftp2.h
 # end snd verison
