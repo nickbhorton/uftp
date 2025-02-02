@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 void useage();
 int validate_address(int argc, char** argv);
@@ -57,24 +58,68 @@ void client_loop(int sockfd, Address* server_address)
             } else if (strncmp("fc\n", buffer, 6) == 0) {
                 send_empty_seq(sockfd, server_address, CLIE_GET_FC, 0, 1);
             } else if (strncmp("put ", buffer, 4) == 0) {
-                StringView filename = {.data = buffer + 4, rv - 5};
-                String chunk = String_from_file_chunked(
-                    filename,
-                    UFTP_PAYLOAD_MAX_SIZE,
-                    0
-                );
-                StringView chunk_sv = StringView_create(&chunk, 0, chunk.len);
-                if (chunk.len != 0) {
-                    send_seq(
-                        sockfd,
-                        server_address,
-                        CLIE_PUT_FC,
-                        0,
-                        1,
-                        chunk_sv
-                    );
+                StringView filename = {.data = buffer + 4, .len = rv - 5};
+                struct stat sb = {};
+                // delete the '\n' so strlen works
+                buffer[rv - 1] = 0;
+                rv = lstat(buffer + 4, &sb);
+                if (rv < 0) {
+                    printf("bad filename\n");
+                    continue;
                 }
-                String_free(&chunk);
+                // set the filename buffer
+                StringView filename_sv = {
+                    .data = buffer + 4,
+                    .len = strlen(buffer + 4)
+                };
+                send_seq(
+                    sockfd,
+                    server_address,
+                    CLIE_SET_FN,
+                    1,
+                    1,
+                    filename_sv
+                );
+                // allocate the proper buffer
+                send_empty_seq(
+                    sockfd,
+                    server_address,
+                    CLIE_ALLOC_FB,
+                    sb.st_size,
+                    1
+                );
+
+                size_t chunk_count =
+                    (sb.st_size / UFTP_PAYLOAD_MAX_SIZE) +
+                    ((sb.st_size % UFTP_PAYLOAD_MAX_SIZE) ? 1 : 0);
+                for (size_t i = 0; i < chunk_count; i++) {
+                    String chunk = String_from_file_chunked(
+                        filename,
+                        UFTP_PAYLOAD_MAX_SIZE,
+                        i * UFTP_PAYLOAD_MAX_SIZE
+                    );
+                    StringView chunk_sv =
+                        StringView_create(&chunk, 0, chunk.len);
+                    if (chunk.len != 0) {
+                        send_seq(
+                            sockfd,
+                            server_address,
+                            CLIE_PUT_FC,
+                            i * UFTP_PAYLOAD_MAX_SIZE,
+                            1,
+                            chunk_sv
+                        );
+                    }
+                    String_free(&chunk);
+                }
+                // write the file
+                send_empty_seq(
+                    sockfd,
+                    server_address,
+                    CLIE_WRITE_F,
+                    sb.st_size,
+                    1
+                );
             }
             memset(buffer, 0, rv);
         }

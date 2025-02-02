@@ -31,6 +31,9 @@ extern int UFTP_TIMEOUT_MS;
 #define CLIE_GET_FC 516
 #define CLIE_PUT_FC 517
 
+#define CLIE_ALLOC_FB 518
+#define CLIE_WRITE_F 519
+
 #define SERV_SUC 0
 
 #define SERV_ERR 256

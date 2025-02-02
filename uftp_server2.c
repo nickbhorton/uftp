@@ -12,6 +12,7 @@ int validate_port(int argc, char** argv);
 int set_signals();
 
 static UdpBoundSocket bs;
+char* file_buffer = NULL;
 
 int main(int argc, char** argv)
 {
@@ -47,58 +48,47 @@ int main(int argc, char** argv)
         int payload_bytes_recv = rv - (int)sizeof(PacketHeader);
 
         switch (packet_header.function) {
-        case CLIE_PUT_FC: {
+        case CLIE_WRITE_F: {
             FILE* fptr = fopen(filename_buffer, "w");
             if (fptr == NULL) {
                 rv = send_func_only(bs.fd, &client_address, SERV_BADF);
                 break;
             }
-            // goto end of file
-            rv = fseek(fptr, 0, SEEK_END);
+            rv = fwrite(
+                file_buffer,
+                sizeof(char),
+                packet_header.sequence_number,
+                fptr
+            );
+            // free the buffer
+            free(file_buffer);
+            file_buffer = NULL;
             if (rv < 0) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADP);
-                fclose(fptr);
+                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
                 break;
             }
-            int file_endpos = ftell(fptr);
-            if (rv < 0) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADP);
-                fclose(fptr);
-                break;
-            }
-            UFTP_DEBUG_MSG("file end at %i\n", rv);
-            // write zero bytes until the position specified
-            while (file_endpos < packet_header.sequence_number) {
-                rv = fputc(0, fptr);
-                if (rv < 0) {
-                    rv = send_func_only(bs.fd, &client_address, SERV_BADP);
-                    goto file_put_fail;
-                }
-            }
-            // goto pos specified
-            rv = fseek(fptr, packet_header.sequence_number, SEEK_SET);
-            if (rv < 0) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADP);
-                fclose(fptr);
-                break;
-            }
-            // write bytes from payload
-            for (size_t i = 0; i < payload_bytes_recv; i++) {
-                rv = fputc(payload_buffer[i], fptr);
-                if (rv < 0) {
-                    rv = send_func_only(bs.fd, &client_address, SERV_BADP);
-                    goto file_put_fail;
-                }
-            }
+            rv = send_empty_seq(bs.fd, &client_address, SERV_SUC, rv, 1);
+            fclose(fptr);
+        }
+        case CLIE_PUT_FC: {
+            memcpy(
+                file_buffer + packet_header.sequence_number,
+                payload_buffer,
+                payload_bytes_recv
+            );
+            UFTP_DEBUG_MSG(
+                "wrote file: %i bytes at %i\n",
+                payload_bytes_recv,
+                packet_header.sequence_number
+            );
             rv = send_empty_seq(
                 bs.fd,
                 &client_address,
                 SERV_SUC,
-                packet_header.sequence_number,
+                payload_bytes_recv,
                 1
             );
-        file_put_fail:
-            fclose(fptr);
+
             break;
         }
         case CLIE_GET_FC: {
@@ -144,6 +134,24 @@ int main(int argc, char** argv)
             // This means max filesize to send is 2^32 4Gb
             rv =
                 send_empty_seq(bs.fd, &client_address, SERV_SUC, sb.st_size, 1);
+            break;
+        }
+        case CLIE_ALLOC_FB: {
+            // if client specs a sequence_number it want us to allocate a buffer
+            // of that size for the incomming file
+            if (packet_header.sequence_number != 0) {
+                if (file_buffer != NULL) {
+                    free(file_buffer);
+                    UFTP_DEBUG_MSG("free previous file buffer\n");
+                    file_buffer = NULL;
+                }
+                file_buffer = malloc(packet_header.sequence_number);
+                UFTP_DEBUG_MSG(
+                    "malloced %i for file\n",
+                    packet_header.sequence_number
+                );
+            }
+            rv = send_func_only(bs.fd, &client_address, SERV_SUC);
             break;
         }
         case CLIE_SET_FN: {
@@ -231,6 +239,9 @@ void term_handle(int signum)
     fflush(stdout);
     fflush(stderr);
     close(bs.fd);
+    if (file_buffer != NULL) {
+        free(file_buffer);
+    }
     exit(0);
 }
 int set_signals()
