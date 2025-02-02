@@ -2,6 +2,8 @@
 
 #include "String.h"
 #include "StringVector.h"
+#include <string.h>
+#include <stdlib.h>
 
 StringVector StringVector_new()
 {

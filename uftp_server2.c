@@ -13,6 +13,7 @@ int set_signals();
 
 static UdpBoundSocket bs;
 char* file_buffer = NULL;
+size_t file_buffer_size = 0;
 
 int main(int argc, char** argv)
 {
@@ -54,6 +55,11 @@ int main(int argc, char** argv)
                 rv = send_func_only(bs.fd, &client_address, SERV_BADF);
                 break;
             }
+            if (packet_header.sequence_number > file_buffer_size ||
+                file_buffer == NULL) {
+                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                break;
+            }
             rv = fwrite(
                 file_buffer,
                 sizeof(char),
@@ -62,7 +68,9 @@ int main(int argc, char** argv)
             );
             // free the buffer
             free(file_buffer);
+            file_buffer_size = 0;
             file_buffer = NULL;
+
             if (rv < 0) {
                 rv = send_func_only(bs.fd, &client_address, SERV_BADF);
                 break;
@@ -142,10 +150,12 @@ int main(int argc, char** argv)
             if (packet_header.sequence_number != 0) {
                 if (file_buffer != NULL) {
                     free(file_buffer);
+                    file_buffer_size = 0;
                     UFTP_DEBUG_MSG("free previous file buffer\n");
                     file_buffer = NULL;
                 }
                 file_buffer = malloc(packet_header.sequence_number);
+                file_buffer_size = packet_header.sequence_number;
                 UFTP_DEBUG_MSG(
                     "malloced %i for file\n",
                     packet_header.sequence_number
@@ -241,6 +251,7 @@ void term_handle(int signum)
     close(bs.fd);
     if (file_buffer != NULL) {
         free(file_buffer);
+        file_buffer_size = 0;
     }
     exit(0);
 }
