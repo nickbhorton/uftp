@@ -1,13 +1,21 @@
+#include "String.h"
 #include "debug_macros.h"
 #include "uftp2.h"
 #include <errno.h>
 #include <poll.h>
+#include <signal.h>
 
 void useage();
 int validate_address(int argc, char** argv);
+int set_signals();
+
+UdpBoundSocket bs;
 
 void client_loop(int sockfd, Address* server_address)
 {
+    // clears term effects
+    printf("\033[0m");
+
     char buffer[UFTP_BUFFER_SIZE];
     memset(buffer, 0, UFTP_BUFFER_SIZE);
     PacketHeader head = {};
@@ -19,6 +27,7 @@ void client_loop(int sockfd, Address* server_address)
     pfds[1].fd = sockfd;
     int event_count = 0;
     int rv = 0;
+    bool exit = false;
     while ((event_count = poll(pfds, 2, UFTP_TIMEOUT_MS)) >= 0) {
         if (event_count == 0) {
             continue;
@@ -32,8 +41,19 @@ void client_loop(int sockfd, Address* server_address)
             }
             if (strncmp("exit\n", buffer, 5) == 0) {
                 send_func_only(sockfd, server_address, CLIE_EXT);
+                exit = true;
             } else if (strncmp("ls\n", buffer, 3) == 0) {
                 send_func_only(sockfd, server_address, CLIE_LS);
+            } else if (strncmp("set ", buffer, 4) == 0) {
+                StringView sv = {.data = buffer + 4, .len = rv - 5};
+                send_seq(sockfd, server_address, CLIE_SET_FN, 1, 1, sv);
+            } else if (strncmp("size\n", buffer, 5) == 0) {
+                send_func_only(sockfd, server_address, CLIE_GET_FS);
+            } else if (strncmp("clear\n", buffer, 6) == 0) {
+                printf("\033[2J\033[1;1H");
+                fflush(stdout);
+            } else if (strncmp("fc\n", buffer, 6) == 0) {
+                send_empty_seq(sockfd, server_address, CLIE_GET_FC, 0, 1);
             }
             memset(buffer, 0, rv);
         }
@@ -42,13 +62,33 @@ void client_loop(int sockfd, Address* server_address)
             if (rv < 0) {
                 continue;
             }
-            printf("packet length %i\n", head.packet_length);
-            printf("packet function %i\n", head.function);
+            if (head.function == SERV_SUC) {
+                printf("\033[0;32mSUC ");
+            }
+            if (head.function == SERV_ERR) {
+                printf("\033[0;31mERR ");
+            }
+            if (head.function == SERV_BADF) {
+                printf("\033[0;31mBADF ");
+            }
+            printf(
+                "%i/%i\033[0m, %lu\n",
+                head.sequence_number,
+                head.sequence_total,
+                head.packet_length - sizeof(PacketHeader)
+            );
             for (size_t i = 0; i < head.packet_length - 20; i++) {
                 printf("%c", buffer[i]);
             }
+            fflush(stdout);
+
+            // reset buffers
             memset(buffer, 0, rv);
             memset(&head, 0, sizeof(PacketHeader));
+
+            if (exit) {
+                break;
+            }
         }
     }
 }
@@ -56,7 +96,16 @@ void client_loop(int sockfd, Address* server_address)
 int main(int argc, char** argv)
 {
     int rv = validate_address(argc, argv);
-    UdpBoundSocket bs = get_udp_socket(NULL, "0");
+    if (rv < 0) {
+        useage();
+        return 1;
+    }
+    rv = set_signals();
+    if (rv < 0) {
+        fprintf(stderr, "signals failed to be set\n");
+        return 1;
+    }
+    bs = get_udp_socket(NULL, "0");
     if (bs.fd < 0) {
         return 1;
     }
@@ -69,6 +118,32 @@ int main(int argc, char** argv)
     client_loop(bs.fd, &server_address);
     close(bs.fd);
 }
+
+void term_handle(int signum)
+{
+    if (signum == SIGINT) {
+        UFTP_DEBUG_ERR("SIGINT\n");
+    } else if (signum == SIGTERM) {
+        UFTP_DEBUG_ERR("SIGTERM\n");
+    }
+    fflush(stdout);
+    fflush(stderr);
+    close(bs.fd);
+    exit(0);
+}
+int set_signals()
+{
+    if (signal(SIGINT, &term_handle) == SIG_ERR) {
+        fprintf(stderr, "signal for termination failed to be set\n");
+        return -1;
+    }
+    if (signal(SIGTERM, &term_handle) == SIG_ERR) {
+        fprintf(stderr, "signal for termination failed to be set\n");
+        return -1;
+    }
+    return 0;
+}
+
 int validate_address(int argc, char** argv)
 {
     int ret;

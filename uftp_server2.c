@@ -1,4 +1,5 @@
 #include <signal.h>
+#include <sys/stat.h>
 
 #include "String.h"
 #include "debug_macros.h"
@@ -24,6 +25,8 @@ int main(int argc, char** argv)
     }
 
     // setup state
+    static char filename_buffer[UFTP_PAYLOAD_MAX_SIZE];
+    memset(filename_buffer, 0, UFTP_PAYLOAD_MAX_SIZE);
     static char payload_buffer[UFTP_PAYLOAD_MAX_SIZE];
     memset(payload_buffer, 0, UFTP_PAYLOAD_MAX_SIZE);
     static PacketHeader packet_header = {};
@@ -42,6 +45,62 @@ int main(int argc, char** argv)
         int payload_bytes_recv = rv - (int)sizeof(PacketHeader);
 
         switch (packet_header.function) {
+        case CLIE_GET_FC: {
+            FILE* fptr = fopen(filename_buffer, "r");
+            if (fptr == NULL) {
+                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                break;
+            }
+            rv = fseek(fptr, packet_header.sequence_number, SEEK_SET);
+            if (rv < 0) {
+                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                fclose(fptr);
+                break;
+            }
+            size_t payload_size = UFTP_PAYLOAD_MAX_SIZE;
+            for (size_t i = 0; i < UFTP_PAYLOAD_MAX_SIZE; i++) {
+                int c = fgetc(fptr);
+                if (c == EOF) {
+                    payload_size = i;
+                    break;
+                }
+                payload_buffer[i] = (char)c;
+            }
+            StringView sv = {.data = payload_buffer, .len = payload_size};
+            rv = send_seq(
+                bs.fd,
+                &client_address,
+                SERV_SUC,
+                packet_header.sequence_number,
+                1,
+                sv
+            );
+            fclose(fptr);
+            break;
+        }
+        case CLIE_GET_FS: {
+            struct stat sb = {};
+            rv = lstat(filename_buffer, &sb);
+            if (rv < 0) {
+                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                break;
+            }
+            // This means max filesize to send is 2^32 4Gb
+            rv =
+                send_empty_seq(bs.fd, &client_address, SERV_SUC, sb.st_size, 1);
+            break;
+        }
+        case CLIE_SET_FN: {
+            memset(filename_buffer, 0, UFTP_PAYLOAD_MAX_SIZE);
+            memcpy(filename_buffer, payload_buffer, rv);
+            UFTP_DEBUG_MSG("filename set: ");
+            for (size_t i = 0; i < payload_bytes_recv; i++) {
+                fprintf(stdout, "%c", payload_buffer[i]);
+            }
+            fprintf(stdout, "\n");
+            rv = send_func_only(bs.fd, &client_address, SERV_SUC);
+            break;
+        }
         case CLIE_LS: {
             String ls_cout;
             rv = get_shell_cmd_cout("ls", &ls_cout);
@@ -72,7 +131,7 @@ int main(int argc, char** argv)
                     (sequence_total - 1) * UFTP_PAYLOAD_MAX_SIZE,
                     ls_cout.len % UFTP_PAYLOAD_MAX_SIZE
                 );
-                send_seq(
+                rv = send_seq(
                     bs.fd,
                     &client_address,
                     SERV_SUC,
@@ -116,9 +175,8 @@ void term_handle(int signum)
     fflush(stdout);
     fflush(stderr);
     close(bs.fd);
-    exit(1);
+    exit(0);
 }
-
 int set_signals()
 {
     if (signal(SIGINT, &term_handle) == SIG_ERR) {

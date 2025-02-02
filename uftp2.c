@@ -105,6 +105,25 @@ int send_seq(
     return send_packet(sockfd, to, head, sv);
 }
 
+int send_empty_seq(
+    int sockfd,
+    const Address* to,
+    uint32_t function,
+    uint32_t sequence_number,
+    uint32_t sequence_total
+)
+{
+    StringView empty_sv = {.data = NULL, .len = 0};
+    return send_seq(
+        sockfd,
+        to,
+        function,
+        sequence_number,
+        sequence_total,
+        empty_sv
+    );
+}
+
 int recv_packet(
     int sockfd,
     Address* from,
@@ -452,3 +471,6 @@ int get_shell_cmd_cout(const char* cmd, String* cout_o)
     }
     return char_count;
 }
+
+
+

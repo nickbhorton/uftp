@@ -23,11 +23,19 @@ extern int UFTP_TIMEOUT_MS;
 // functions for packets
 #define CLIE_EXT 512
 #define CLIE_LS 513
+// filename
+#define CLIE_SET_FN 514
+// file size
+#define CLIE_GET_FS 515
+// file chunk
+#define CLIE_GET_FC 516
+#define CLIE_PUT_FC 517
 
 #define SERV_SUC 0
 
 #define SERV_ERR 256
 #define SERV_UNKNOWN_FUNC 257
+#define SERV_BADF 258
 
 typedef struct __attribute__((packed)) {
     uint32_t packet_length;
@@ -65,6 +73,13 @@ int send_packet(
     const StringView payload
 );
 int send_func_only(int sockfd, const Address* to, uint32_t function);
+int send_empty_seq(
+    int sockfd,
+    const Address* to,
+    uint32_t function,
+    uint32_t sequence_number,
+    uint32_t sequence_total
+);
 int send_seq(
     int sockfd,
     const Address* to,
