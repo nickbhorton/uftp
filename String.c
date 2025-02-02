@@ -1,6 +1,8 @@
 #include "String.h"
 #include <ctype.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define INIT_MALLOC 64
 
@@ -280,15 +282,16 @@ String String_from_file(const String* filename)
 }
 
 String String_from_file_chunked(
-    const String* filename,
+    StringView filename,
     size_t chunk_size,
     size_t chunk_position
 )
 {
-    char* filename_cstr = String_to_cstr(filename);
-    FILE* fptr;
+    char* filename_cstr = malloc(filename.len + 1);
+    filename_cstr[filename.len] = 0;
+    memcpy(filename_cstr, filename.data, filename.len);
     // b is ignored on linux but for portability?
-    fptr = fopen(filename_cstr, "rb");
+    FILE* fptr = fopen(filename_cstr, "rb");
     String s = String_new();
     if (fptr == NULL) {
         fprintf(stderr, "failed to open file %s\n", filename_cstr);

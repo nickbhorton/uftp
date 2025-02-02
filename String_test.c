@@ -1,4 +1,5 @@
 #include "String.h"
+#include <stdlib.h>
 
 int main()
 {

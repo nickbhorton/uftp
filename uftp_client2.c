@@ -4,6 +4,8 @@
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdlib.h>
+#include <string.h>
 
 void useage();
 int validate_address(int argc, char** argv);
@@ -54,6 +56,25 @@ void client_loop(int sockfd, Address* server_address)
                 fflush(stdout);
             } else if (strncmp("fc\n", buffer, 6) == 0) {
                 send_empty_seq(sockfd, server_address, CLIE_GET_FC, 0, 1);
+            } else if (strncmp("put ", buffer, 4) == 0) {
+                StringView filename = {.data = buffer + 4, rv - 5};
+                String chunk = String_from_file_chunked(
+                    filename,
+                    UFTP_PAYLOAD_MAX_SIZE,
+                    0
+                );
+                StringView chunk_sv = StringView_create(&chunk, 0, chunk.len);
+                if (chunk.len != 0) {
+                    send_seq(
+                        sockfd,
+                        server_address,
+                        CLIE_PUT_FC,
+                        0,
+                        1,
+                        chunk_sv
+                    );
+                }
+                String_free(&chunk);
             }
             memset(buffer, 0, rv);
         }
@@ -70,6 +91,9 @@ void client_loop(int sockfd, Address* server_address)
             }
             if (head.function == SERV_BADF) {
                 printf("\033[0;31mBADF ");
+            }
+            if (head.function == SERV_BADP) {
+                printf("\033[0;31mBADP ");
             }
             printf(
                 "%i/%i\033[0m, %lu\n",

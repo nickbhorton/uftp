@@ -17,3 +17,4 @@ logs
 compile_commands.json
 
 uftp2_test
+*.test

@@ -4,8 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 typedef struct {
     char* data;
@@ -57,11 +55,6 @@ void String_dbprint_hex(const String* s);
 // Read entire file into a String
 String String_from_file(const String* filename);
 // Read file chunk into string
-String String_from_file_chunked(
-    const String* filename,
-    size_t chunk_size,
-    size_t chunk_position
-);
 // Write entire String to file
 void String_to_file(String* s, const String* filename);
 // Write a chunk to a file
@@ -89,5 +82,11 @@ StringView StringView_from_cstr(const char* data);
 void StringView_fprint(const StringView* sv, FILE* stream, bool with_newline);
 
 void String_push_sv(String* to, StringView from);
+
+String String_from_file_chunked(
+    StringView filename,
+    size_t chunk_size,
+    size_t chunk_position
+);
 
 #endif

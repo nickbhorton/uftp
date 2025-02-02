@@ -1,5 +1,7 @@
 #include "debug_macros.h"
 #include "uftp2.h"
+#include <stdlib.h>
+#include <string.h>
 
 #define TESTING_TIMEOUT_DFLT 1000;
 #define TESTING_DBPRINT_DFLT 1;

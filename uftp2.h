@@ -36,6 +36,7 @@ extern int UFTP_TIMEOUT_MS;
 #define SERV_ERR 256
 #define SERV_UNKNOWN_FUNC 257
 #define SERV_BADF 258
+#define SERV_BADP 259
 
 typedef struct __attribute__((packed)) {
     uint32_t packet_length;
