@@ -67,7 +67,10 @@ int main(int argc, char** argv)
                 fptr
             );
 
-            UFTP_DEBUG_MSG("wrote file of size %i\n", packet_header.sequence_number);
+            UFTP_DEBUG_MSG(
+                "wrote file of size %i\n",
+                packet_header.sequence_number
+            );
 
             // clean up
             free(file_buffer);
@@ -144,12 +147,17 @@ int main(int argc, char** argv)
             struct stat sb = {};
             rv = lstat(filename_buffer, &sb);
             if (rv < 0) {
-                rv = send_func_only(bs.fd, &client_address, SERV_ERR);
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR_GET_FS);
                 break;
             }
             // This means max filesize to send is 2^32 4Gb
-            rv =
-                send_empty_seq(bs.fd, &client_address, SERV_SUC, sb.st_size, 1);
+            rv = send_empty_seq(
+                bs.fd,
+                &client_address,
+                SERV_SUC_GET_FS,
+                sb.st_size,
+                1
+            );
             break;
         }
         case CLIE_ALLOC_FB: {

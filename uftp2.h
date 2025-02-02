@@ -36,6 +36,8 @@ extern int UFTP_TIMEOUT_MS;
 #define SERV_SUC_ALLOC_FB 3
 #define SERV_SUC_PUT_FC 4
 #define SERV_SUC_WRITE_F 5
+#define SERV_SUC_GET_FS 6
+#define SERV_SUC_GET_FC 7
 
 #define SERV_ERR 256
 #define SERV_ERR_LS 257
@@ -43,6 +45,8 @@ extern int UFTP_TIMEOUT_MS;
 #define SERV_ERR_ALLOC_FB 259
 #define SERV_ERR_PUT_FC 260
 #define SERV_ERR_WRITE_F 261
+#define SERV_ERR_GET_FS 262
+#define SERV_ERR_GET_FC 263
 
 #define SERV_UNKNOWN_FUNC 262
 
