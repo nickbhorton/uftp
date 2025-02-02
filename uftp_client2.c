@@ -216,6 +216,7 @@ void client_loop(int sockfd, Address* server_address)
                         filesize
                     );
                 }
+                UFTP_DEBUG_MSG("wrote file of size %i\n", rv);
                 fclose(fptr);
                 free(file_buffer);
             }
