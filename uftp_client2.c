@@ -129,16 +129,41 @@ void client_loop(int sockfd, Address* server_address)
                 continue;
             }
             if (head.function == SERV_SUC) {
-                printf("\033[0;32mSUC ");
+                printf("\033[0;32mSERV_SUC ");
             }
+            if (head.function == SERV_SUC_LS) {
+                printf("\033[0;32mSERV_SUC_LS ");
+            }
+            if (head.function == SERV_SUC_SET_FN) {
+                printf("\033[0;32mSERV_SUC_SET_FN ");
+            }
+            if (head.function == SERV_SUC_ALLOC_FB) {
+                printf("\033[0;32mSERV_SUC_ALLOC_FB ");
+            }
+            if (head.function == SERV_SUC_PUT_FC) {
+                printf("\033[0;32mSERV_SUC_PUT_FC ");
+            }
+            if (head.function == SERV_SUC_WRITE_F) {
+                printf("\033[0;32mSERV_SUC_WRITE_F ");
+            }
+
             if (head.function == SERV_ERR) {
-                printf("\033[0;31mERR ");
+                printf("\033[0;31mSERV_ERR ");
             }
-            if (head.function == SERV_BADF) {
-                printf("\033[0;31mBADF ");
+            if (head.function == SERV_ERR_LS) {
+                printf("\033[0;31mSERV_ERR_LS ");
             }
-            if (head.function == SERV_BADP) {
-                printf("\033[0;31mBADP ");
+            if (head.function == SERV_ERR_SET_FN) {
+                printf("\033[0;31mSERV_ERR_SET_FN ");
+            }
+            if (head.function == SERV_ERR_ALLOC_FB) {
+                printf("\033[0;31mSERV_ERR_ALLOC_FB ");
+            }
+            if (head.function == SERV_ERR_PUT_FC) {
+                printf("\033[0;31mSERV_ERR_PUT_FC ");
+            }
+            if (head.function == SERV_ERR_WRITE_F) {
+                printf("\033[0;31mSERV_ERR_WRITE_F ");
             }
             printf(
                 "%i/%i\033[0m, %lu\n",

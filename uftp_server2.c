@@ -52,12 +52,12 @@ int main(int argc, char** argv)
         case CLIE_WRITE_F: {
             FILE* fptr = fopen(filename_buffer, "w");
             if (fptr == NULL) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR_WRITE_F);
                 break;
             }
             if (packet_header.sequence_number > file_buffer_size ||
                 file_buffer == NULL) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR_WRITE_F);
                 break;
             }
             rv = fwrite(
@@ -66,48 +66,56 @@ int main(int argc, char** argv)
                 packet_header.sequence_number,
                 fptr
             );
-            // free the buffer
+
+            UFTP_DEBUG_MSG("wrote file of size %i\n", packet_header.sequence_number);
+
+            // clean up
             free(file_buffer);
             file_buffer_size = 0;
             file_buffer = NULL;
+            fclose(fptr);
 
             if (rv < 0) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR_WRITE_F);
                 break;
             }
-            rv = send_empty_seq(bs.fd, &client_address, SERV_SUC, rv, 1);
-            fclose(fptr);
+            rv =
+                send_empty_seq(bs.fd, &client_address, SERV_SUC_WRITE_F, rv, 1);
+            break;
         }
         case CLIE_PUT_FC: {
+            if (packet_header.sequence_number > file_buffer_size) {
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR_PUT_FC);
+                break;
+            }
             memcpy(
                 file_buffer + packet_header.sequence_number,
                 payload_buffer,
                 payload_bytes_recv
             );
             UFTP_DEBUG_MSG(
-                "wrote file: %i bytes at %i\n",
+                "write file_buffer: %i bytes at %i\n",
                 payload_bytes_recv,
                 packet_header.sequence_number
             );
             rv = send_empty_seq(
                 bs.fd,
                 &client_address,
-                SERV_SUC,
+                SERV_SUC_PUT_FC,
                 payload_bytes_recv,
                 1
             );
-
             break;
         }
         case CLIE_GET_FC: {
             FILE* fptr = fopen(filename_buffer, "r");
             if (fptr == NULL) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR);
                 break;
             }
             rv = fseek(fptr, packet_header.sequence_number, SEEK_SET);
             if (rv < 0) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADP);
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR);
                 fclose(fptr);
                 break;
             }
@@ -136,7 +144,7 @@ int main(int argc, char** argv)
             struct stat sb = {};
             rv = lstat(filename_buffer, &sb);
             if (rv < 0) {
-                rv = send_func_only(bs.fd, &client_address, SERV_BADF);
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR);
                 break;
             }
             // This means max filesize to send is 2^32 4Gb
@@ -161,7 +169,7 @@ int main(int argc, char** argv)
                     packet_header.sequence_number
                 );
             }
-            rv = send_func_only(bs.fd, &client_address, SERV_SUC);
+            rv = send_func_only(bs.fd, &client_address, SERV_SUC_ALLOC_FB);
             break;
         }
         case CLIE_SET_FN: {
@@ -172,14 +180,14 @@ int main(int argc, char** argv)
                 fprintf(stdout, "%c", payload_buffer[i]);
             }
             fprintf(stdout, "'\n");
-            rv = send_func_only(bs.fd, &client_address, SERV_SUC);
+            rv = send_func_only(bs.fd, &client_address, SERV_SUC_SET_FN);
             break;
         }
         case CLIE_LS: {
             String ls_cout;
             rv = get_shell_cmd_cout("ls", &ls_cout);
             if (rv < 0) {
-                send_func_only(bs.fd, &client_address, SERV_ERR);
+                send_func_only(bs.fd, &client_address, SERV_ERR_LS);
             } else {
                 // send full packets
                 uint32_t sequence_total =
@@ -193,7 +201,7 @@ int main(int argc, char** argv)
                     send_seq(
                         bs.fd,
                         &client_address,
-                        SERV_SUC,
+                        SERV_SUC_LS,
                         i + 1,
                         sequence_total,
                         sv
@@ -208,7 +216,7 @@ int main(int argc, char** argv)
                 rv = send_seq(
                     bs.fd,
                     &client_address,
-                    SERV_SUC,
+                    SERV_SUC_LS,
                     sequence_total,
                     sequence_total,
                     sv

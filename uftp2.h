@@ -20,26 +20,31 @@ extern int UFTP_TIMEOUT_MS;
 #define UFTP_BUFFER_SIZE 1024
 #define UFTP_PROTOCOL_VERSION 1
 
-// functions for packets
 #define CLIE_EXT 512
 #define CLIE_LS 513
-// filename
 #define CLIE_SET_FN 514
-// file size
-#define CLIE_GET_FS 515
-// file chunk
-#define CLIE_GET_FC 516
-#define CLIE_PUT_FC 517
+#define CLIE_ALLOC_FB 515
+#define CLIE_PUT_FC 516
+#define CLIE_WRITE_F 517
 
-#define CLIE_ALLOC_FB 518
-#define CLIE_WRITE_F 519
+#define CLIE_GET_FS 518
+#define CLIE_GET_FC 519
 
 #define SERV_SUC 0
+#define SERV_SUC_LS 1
+#define SERV_SUC_SET_FN 2
+#define SERV_SUC_ALLOC_FB 3
+#define SERV_SUC_PUT_FC 4
+#define SERV_SUC_WRITE_F 5
 
 #define SERV_ERR 256
-#define SERV_UNKNOWN_FUNC 257
-#define SERV_BADF 258
-#define SERV_BADP 259
+#define SERV_ERR_LS 257
+#define SERV_ERR_SET_FN 258
+#define SERV_ERR_ALLOC_FB 259
+#define SERV_ERR_PUT_FC 260
+#define SERV_ERR_WRITE_F 261
+
+#define SERV_UNKNOWN_FUNC 262
 
 typedef struct __attribute__((packed)) {
     uint32_t packet_length;
