@@ -68,7 +68,7 @@ int main(int argc, char** argv)
             );
 
             UFTP_DEBUG_MSG(
-                "wrote file of size %i\n",
+                "write file of size %i\n",
                 packet_header.sequence_number
             );
 
@@ -88,6 +88,11 @@ int main(int argc, char** argv)
         }
         case CLIE_PUT_FC: {
             if (packet_header.sequence_number > file_buffer_size) {
+                UFTP_DEBUG_ERR(
+                    "%i larger than file_buffer_size %i\n",
+                    packet_header.sequence_number,
+                    payload_bytes_recv
+                );
                 rv = send_func_only(bs.fd, &client_address, SERV_ERR_PUT_FC);
                 break;
             }
@@ -95,11 +100,6 @@ int main(int argc, char** argv)
                 file_buffer + packet_header.sequence_number,
                 payload_buffer,
                 payload_bytes_recv
-            );
-            UFTP_DEBUG_MSG(
-                "write file_buffer: %i bytes at %i\n",
-                payload_bytes_recv,
-                packet_header.sequence_number
             );
             rv = send_empty_seq(
                 bs.fd,

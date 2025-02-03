@@ -12,6 +12,7 @@
 void useage();
 int validate_address(int argc, char** argv);
 int set_signals();
+void term_handle(int signum);
 
 UdpBoundSocket bs;
 
@@ -19,10 +20,12 @@ void client_loop(int sockfd, Address* server_address)
 {
     // clears term effects
     printf("\033[0m");
+    fflush(stdout);
 
-    char buffer[UFTP_BUFFER_SIZE];
-    memset(buffer, 0, UFTP_BUFFER_SIZE);
-    PacketHeader head = {};
+    char input_buffer[UFTP_BUFFER_SIZE];
+    memset(input_buffer, 0, UFTP_BUFFER_SIZE);
+    char packet_buffer[UFTP_BUFFER_SIZE];
+    memset(packet_buffer, 0, UFTP_BUFFER_SIZE);
 
     struct pollfd pfds[2];
     pfds[0].events = POLLIN;
@@ -31,199 +34,388 @@ void client_loop(int sockfd, Address* server_address)
     pfds[1].fd = sockfd;
     int event_count = 0;
     int rv = 0;
-    bool exit = false;
+    bool exit_clie = false;
     while ((event_count = poll(pfds, 2, UFTP_TIMEOUT_MS)) >= 0) {
         if (event_count == 0) {
+            if (exit_clie) {
+                break;
+            }
             continue;
         }
         if (pfds[0].revents & POLLIN) {
-            rv = read(pfds[0].fd, buffer, UFTP_BUFFER_SIZE);
+            rv = read(pfds[0].fd, input_buffer, UFTP_BUFFER_SIZE);
             if (rv < 0) {
                 int en = errno;
                 UFTP_DEBUG_ERR("read returned %i errno:%i\n", rv, en);
                 continue;
             }
-            if (strncmp("exit\n", buffer, 5) == 0) {
-                send_func_only(sockfd, server_address, CLIE_EXT);
-                exit = true;
-            } else if (strncmp("ls\n", buffer, 3) == 0) {
-                send_func_only(sockfd, server_address, CLIE_LS);
-            } else if (strncmp("set ", buffer, 4) == 0) {
-                StringView sv = {.data = buffer + 4, .len = rv - 5};
-                send_seq(sockfd, server_address, CLIE_SET_FN, 1, 1, sv);
-            } else if (strncmp("size\n", buffer, 5) == 0) {
-                send_func_only(sockfd, server_address, CLIE_GET_FS);
-            } else if (strncmp("clear\n", buffer, 6) == 0) {
-                printf("\033[2J\033[1;1H");
-                fflush(stdout);
-            } else if (strncmp("fc\n", buffer, 6) == 0) {
-                send_empty_seq(sockfd, server_address, CLIE_GET_FC, 0, 1);
-            } else if (strncmp("put ", buffer, 4) == 0) {
-                StringView filename = {.data = buffer + 4, .len = rv - 5};
-                struct stat sb = {};
-                // delete the '\n' so strlen works
-                buffer[rv - 1] = 0;
-                rv = lstat(buffer + 4, &sb);
-                if (rv < 0) {
-                    printf("bad filename\n");
-                    continue;
+            int input_used = 0;
+            int input_total = rv;
+            /*
+            if (input_total > 0) {
+                printf("input_total %i\n", input_total);
+            }
+            */
+            while (input_used < input_total) {
+                int next_nl = input_used;
+                while (input_buffer[next_nl] != '\n' &&
+                       input_buffer[next_nl] != '\0') {
+                    next_nl++;
                 }
-                // set the filename buffer
-                StringView filename_sv = {
-                    .data = buffer + 4,
-                    .len = strlen(buffer + 4)
-                };
-                send_seq(
-                    sockfd,
-                    server_address,
-                    CLIE_SET_FN,
-                    1,
-                    1,
-                    filename_sv
-                );
-                // allocate the proper buffer
-                send_empty_seq(
-                    sockfd,
-                    server_address,
-                    CLIE_ALLOC_FB,
-                    sb.st_size,
-                    1
-                );
-
-                size_t chunk_count =
-                    (sb.st_size / UFTP_PAYLOAD_MAX_SIZE) +
-                    ((sb.st_size % UFTP_PAYLOAD_MAX_SIZE) ? 1 : 0);
-                for (size_t i = 0; i < chunk_count; i++) {
-                    String chunk = String_from_file_chunked(
-                        filename,
-                        UFTP_PAYLOAD_MAX_SIZE,
-                        i * UFTP_PAYLOAD_MAX_SIZE
-                    );
-                    StringView chunk_sv =
-                        StringView_create(&chunk, 0, chunk.len);
-                    if (chunk.len != 0) {
-                        send_seq(
-                            sockfd,
-                            server_address,
-                            CLIE_PUT_FC,
-                            i * UFTP_PAYLOAD_MAX_SIZE,
-                            1,
-                            chunk_sv
-                        );
-                    }
-                    String_free(&chunk);
+                /*
+                printf("to process: ");
+                for (int i = input_used; i < next_nl; i++) {
+                    printf("%c", input_buffer[i]);
                 }
-                // write the file
-                send_empty_seq(
-                    sockfd,
-                    server_address,
-                    CLIE_WRITE_F,
-                    sb.st_size,
-                    1
-                );
-            } else if (strncmp("get ", buffer, 4) == 0) {
-                // make strnlen viable
-                buffer[rv - 1] = 0;
-                FILE* fptr = fopen(buffer + 4, "w");
-                if (fptr == NULL) {
-                    printf("could not open file of that name\n");
-                    continue;
-                }
-
-                // set the filename buffer
-                StringView filename_sv = {
-                    .data = buffer + 4,
-                    .len = strlen(buffer + 4)
-                };
-                send_seq(
-                    sockfd,
-                    server_address,
-                    CLIE_SET_FN,
-                    1,
-                    1,
-                    filename_sv
-                );
-                PacketHeader head_fn = {};
-                rv = recv_packet(sockfd, server_address, &head_fn, buffer);
-                if (rv == 0) {
-                    printf("server timeout\n");
-                }
-                if (rv <= 0) {
-                    fclose(fptr);
-                    continue;
-                }
-                if (head_fn.function >= SERV_ERR) {
-                    printf("server error\n");
-                    fclose(fptr);
-                    continue;
-                }
-
-                send_empty_seq(sockfd, server_address, CLIE_GET_FS, 1, 1);
-                PacketHeader head_fs = {};
-                rv = recv_packet(sockfd, server_address, &head_fs, buffer);
-                if (rv == 0) {
-                    printf("server timeout\n");
-                }
-                if (rv <= 0) {
-                    fclose(fptr);
-                    continue;
-                }
-                if (head_fs.function >= SERV_ERR) {
-                    printf("no such file\n");
-                    fclose(fptr);
-                    continue;
-                }
-                size_t filesize = head_fs.sequence_number;
-                char* file_buffer = malloc(filesize);
-                size_t chunk_count =
-                    (filesize / UFTP_PAYLOAD_MAX_SIZE) +
-                    ((filesize % UFTP_PAYLOAD_MAX_SIZE) ? 1 : 0);
-                for (size_t i = 0; i < chunk_count; i++) {
-                    rv = send_empty_seq(
+                printf("\n");
+                */
+                if (strncmp("exit\n", input_buffer + input_used, 5) == 0) {
+                    input_used += 5;
+                    send_func_only(sockfd, server_address, CLIE_EXT);
+                    PacketHeader head_exit = {};
+                    rv = recv_packet(
                         sockfd,
                         server_address,
-                        CLIE_GET_FC,
-                        i * UFTP_PAYLOAD_MAX_SIZE,
+                        &head_exit,
+                        packet_buffer
+                    );
+                    if (rv == 0) {
+                        UFTP_DEBUG_MSG("server timeout\n");
+                        term_handle(SIGTERM);
+                    }
+                    if (rv <= 0) {
+                        term_handle(SIGTERM);
+                    }
+                    if (head_exit.function >= SERV_ERR) {
+                        UFTP_DEBUG_MSG("server error %i\n", head_exit.function);
+                        term_handle(SIGTERM);
+                    }
+                    term_handle(SIGTERM);
+                } else if (strncmp("ls\n", input_buffer + input_used, 3) == 0) {
+                    input_used += 3;
+                    PacketHeader head_ls = {};
+                    send_func_only(sockfd, server_address, CLIE_LS);
+                    while (1) {
+                        rv = recv_packet(
+                            sockfd,
+                            server_address,
+                            &head_ls,
+                            packet_buffer
+                        );
+                        if (rv == 0) {
+                            UFTP_DEBUG_MSG("server timeout\n");
+                        }
+                        if (rv <= 0) {
+                            continue;
+                        }
+                        if (head_ls.function >= SERV_ERR) {
+                            UFTP_DEBUG_MSG(
+                                "server error %i\n",
+                                head_ls.function
+                            );
+                            continue;
+                        }
+                        for (int i = 0; i < rv; i++) {
+                            printf("%c", packet_buffer[i]);
+                        }
+                        // exit cond
+                        if (head_ls.sequence_total == head_ls.sequence_number) {
+                            break;
+                        }
+                    }
+
+                } else if (strncmp("set ", input_buffer + input_used, 4) == 0) {
+                    input_used += 4;
+                    StringView filename = {
+                        .data = input_buffer + input_used,
+                        .len = input_used - next_nl
+                    };
+                    send_seq(
+                        sockfd,
+                        server_address,
+                        CLIE_SET_FN,
+                        1,
+                        1,
+                        filename
+                    );
+                } else if (strncmp("size\n", input_buffer + input_used, 5) ==
+                           0) {
+                    input_used += 5;
+                    send_func_only(sockfd, server_address, CLIE_GET_FS);
+                } else if (strncmp("clear\n", input_buffer + input_used, 6) ==
+                           0) {
+                    input_used += 6;
+                    printf("\033[2J\033[1;1H");
+                    fflush(stdout);
+                } else if (strncmp("fc\n", input_buffer + input_used, 3) == 0) {
+                    input_used += 3;
+                    send_empty_seq(sockfd, server_address, CLIE_GET_FC, 0, 1);
+                } else if (strncmp("put ", input_buffer + input_used, 4) == 0) {
+                    input_used += 4;
+                    StringView filename_sv = {
+                        .data = input_buffer + input_used,
+                        .len = next_nl - input_used
+                    };
+                    // delete the '\n' so strlen works
+                    input_buffer[next_nl] = 0;
+                    input_used = next_nl + 1;
+
+                    struct stat sb = {};
+                    rv = lstat(filename_sv.data, &sb);
+                    if (rv < 0) {
+                        printf("bad filename\n");
+                        continue;
+                    }
+                    // set the filename buffer
+                    // set the filename
+                    send_seq(
+                        sockfd,
+                        server_address,
+                        CLIE_SET_FN,
+                        1,
+                        1,
+                        filename_sv
+                    );
+
+                    PacketHeader put_head = {};
+                    rv = recv_packet(
+                        sockfd,
+                        server_address,
+                        &put_head,
+                        packet_buffer
+                    );
+                    if (rv == 0) {
+                        UFTP_DEBUG_MSG("server timeout\n");
+                    }
+                    if (rv <= 0) {
+                        continue;
+                    }
+                    if (put_head.function >= SERV_ERR) {
+                        UFTP_DEBUG_MSG("server error %i\n", put_head.function);
+                        continue;
+                    }
+
+                    // allocate the proper buffer
+                    send_empty_seq(
+                        sockfd,
+                        server_address,
+                        CLIE_ALLOC_FB,
+                        sb.st_size,
                         1
                     );
-                    rv = recv_packet(sockfd, server_address, &head_fs, buffer);
+                    rv = recv_packet(
+                        sockfd,
+                        server_address,
+                        &put_head,
+                        packet_buffer
+                    );
                     if (rv == 0) {
-                        free(file_buffer);
+                        UFTP_DEBUG_MSG("server timeout\n");
+                    }
+                    if (rv <= 0) {
+                        continue;
+                    }
+                    if (put_head.function >= SERV_ERR) {
+                        UFTP_DEBUG_MSG("server error %i\n", put_head.function);
+                        continue;
+                    }
+
+                    size_t chunk_count =
+                        (sb.st_size / UFTP_PAYLOAD_MAX_SIZE) +
+                        ((sb.st_size % UFTP_PAYLOAD_MAX_SIZE) ? 1 : 0);
+                    for (size_t i = 0; i < chunk_count; i++) {
+                        String chunk = String_from_file_chunked(
+                            filename_sv,
+                            UFTP_PAYLOAD_MAX_SIZE,
+                            i * UFTP_PAYLOAD_MAX_SIZE
+                        );
+                        StringView chunk_sv =
+                            StringView_create(&chunk, 0, chunk.len);
+                        if (chunk.len != 0) {
+                            send_seq(
+                                sockfd,
+                                server_address,
+                                CLIE_PUT_FC,
+                                i * UFTP_PAYLOAD_MAX_SIZE,
+                                1,
+                                chunk_sv
+                            );
+                            rv = recv_packet(
+                                sockfd,
+                                server_address,
+                                &put_head,
+                                packet_buffer
+                            );
+                            if (rv == 0) {
+                                UFTP_DEBUG_MSG("server timeout\n");
+                            }
+                            if (rv <= 0) {
+                                String_free(&chunk);
+                                continue;
+                            }
+                            if (put_head.function >= SERV_ERR) {
+                                String_free(&chunk);
+                                UFTP_DEBUG_MSG(
+                                    "server error %i\n",
+                                    put_head.function
+                                );
+                                continue;
+                            }
+                        }
+                        String_free(&chunk);
+                    }
+                    // write the file
+                    send_empty_seq(
+                        sockfd,
+                        server_address,
+                        CLIE_WRITE_F,
+                        sb.st_size,
+                        1
+                    );
+                    rv = recv_packet(
+                        sockfd,
+                        server_address,
+                        &put_head,
+                        packet_buffer
+                    );
+                    if (rv == 0) {
+                        UFTP_DEBUG_MSG("server timeout\n");
+                    }
+                    if (rv <= 0) {
+                        continue;
+                    }
+                    if (put_head.function >= SERV_ERR) {
+                        UFTP_DEBUG_MSG("server error %i\n", put_head.function);
+                        continue;
+                    }
+                    UFTP_DEBUG_MSG("send file of size %li\n", sb.st_size);
+                } else if (strncmp("get ", input_buffer + input_used, 4) == 0) {
+                    input_used += 4;
+                    StringView filename_sv = {
+                        .data = input_buffer + input_used,
+                        .len = next_nl - input_used
+                    };
+                    // delete the '\n' so strlen works
+                    input_buffer[next_nl] = 0;
+                    input_used = next_nl + 1;
+
+                    FILE* fptr = fopen(filename_sv.data, "w");
+                    if (fptr == NULL) {
+                        printf("could not open file of that name\n");
+                        continue;
+                    }
+
+                    // set the filename buffer
+                    send_seq(
+                        sockfd,
+                        server_address,
+                        CLIE_SET_FN,
+                        1,
+                        1,
+                        filename_sv
+                    );
+                    PacketHeader head_fn = {};
+                    rv = recv_packet(
+                        sockfd,
+                        server_address,
+                        &head_fn,
+                        packet_buffer
+                    );
+                    if (rv == 0) {
                         printf("server timeout\n");
                     }
                     if (rv <= 0) {
-                        free(file_buffer);
+                        fclose(fptr);
+                        continue;
+                    }
+                    if (head_fn.function >= SERV_ERR) {
+                        printf("server error\n");
+                        fclose(fptr);
+                        continue;
+                    }
+
+                    send_empty_seq(sockfd, server_address, CLIE_GET_FS, 1, 1);
+                    PacketHeader head_fs = {};
+                    rv = recv_packet(
+                        sockfd,
+                        server_address,
+                        &head_fs,
+                        packet_buffer
+                    );
+                    if (rv == 0) {
+                        printf("server timeout\n");
+                    }
+                    if (rv <= 0) {
                         fclose(fptr);
                         continue;
                     }
                     if (head_fs.function >= SERV_ERR) {
-                        printf("file transfer error\n");
-                        free(file_buffer);
+                        printf("no such file\n");
                         fclose(fptr);
                         continue;
                     }
-                    memcpy(
-                        file_buffer + (i * UFTP_PAYLOAD_MAX_SIZE),
-                        buffer,
-                        rv - sizeof(PacketHeader)
-                    );
+                    size_t filesize = head_fs.sequence_number;
+                    char* file_buffer = malloc(filesize);
+                    size_t chunk_count =
+                        (filesize / UFTP_PAYLOAD_MAX_SIZE) +
+                        ((filesize % UFTP_PAYLOAD_MAX_SIZE) ? 1 : 0);
+                    for (size_t i = 0; i < chunk_count; i++) {
+                        rv = send_empty_seq(
+                            sockfd,
+                            server_address,
+                            CLIE_GET_FC,
+                            i * UFTP_PAYLOAD_MAX_SIZE,
+                            1
+                        );
+                        rv = recv_packet(
+                            sockfd,
+                            server_address,
+                            &head_fs,
+                            packet_buffer
+                        );
+                        if (rv == 0) {
+                            free(file_buffer);
+                            printf("server timeout\n");
+                        }
+                        if (rv <= 0) {
+                            free(file_buffer);
+                            fclose(fptr);
+                            continue;
+                        }
+                        if (head_fs.function >= SERV_ERR) {
+                            printf("file transfer error\n");
+                            free(file_buffer);
+                            fclose(fptr);
+                            continue;
+                        }
+                        memcpy(
+                            file_buffer + (i * UFTP_PAYLOAD_MAX_SIZE),
+                            packet_buffer,
+                            rv - sizeof(PacketHeader)
+                        );
+                    }
+                    int rv = fwrite(file_buffer, sizeof(char), filesize, fptr);
+                    if (rv != filesize) {
+                        printf(
+                            "only wrote %i bytes to file of size %zu\n",
+                            rv,
+                            filesize
+                        );
+                    }
+                    UFTP_DEBUG_MSG("wrote file of size %i\n", rv);
+                    fclose(fptr);
+                    free(file_buffer);
+                } else {
+                    input_used = next_nl + 1;
                 }
-                int rv = fwrite(file_buffer, sizeof(char), filesize, fptr);
-                if (rv != filesize) {
-                    printf(
-                        "only wrote %i bytes to file of size %zu\n",
-                        rv,
-                        filesize
-                    );
-                }
-                UFTP_DEBUG_MSG("wrote file of size %i\n", rv);
-                fclose(fptr);
-                free(file_buffer);
+                // clear packet buffer
+                memset(packet_buffer, 0, UFTP_PAYLOAD_MAX_SIZE);
             }
-            memset(buffer, 0, UFTP_PAYLOAD_MAX_SIZE);
+            memset(input_buffer, 0, UFTP_PAYLOAD_MAX_SIZE);
         }
         if (pfds[1].revents & POLLIN) {
-            rv = recv_packet(sockfd, server_address, &head, buffer);
+            PacketHeader head = {};
+            rv = recv_packet(sockfd, server_address, &head, input_buffer);
             if (rv < 0) {
                 continue;
             }
@@ -283,17 +475,13 @@ void client_loop(int sockfd, Address* server_address)
                 head.packet_length - sizeof(PacketHeader)
             );
             for (size_t i = 0; i < head.packet_length - 20; i++) {
-                printf("%c", buffer[i]);
+                printf("%c", input_buffer[i]);
             }
             fflush(stdout);
 
             // reset buffers
-            memset(buffer, 0, rv);
+            memset(input_buffer, 0, rv);
             memset(&head, 0, sizeof(PacketHeader));
-
-            if (exit) {
-                break;
-            }
         }
     }
 }
@@ -302,7 +490,6 @@ int main(int argc, char** argv)
 {
     int rv = validate_address(argc, argv);
     if (rv < 0) {
-        useage();
         return 1;
     }
     rv = set_signals();
