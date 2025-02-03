@@ -123,7 +123,68 @@ void client_loop(int sockfd, Address* server_address)
                             break;
                         }
                     }
+                } else if (strncmp("delete ", input_buffer + input_used, 7) ==
+                           0) {
+                    input_used += 7;
+                    StringView filename_sv = {
+                        .data = input_buffer + input_used,
+                        .len = next_nl - input_used
+                    };
+                    // delete the '\n' so strlen works
+                    input_buffer[next_nl] = 0;
+                    input_used = next_nl + 1;
 
+                    // set the filename
+                    send_seq(
+                        sockfd,
+                        server_address,
+                        CLIE_SET_FN,
+                        1,
+                        1,
+                        filename_sv
+                    );
+                    PacketHeader delete_head = {};
+                    rv = recv_packet(
+                        sockfd,
+                        server_address,
+                        &delete_head,
+                        packet_buffer
+                    );
+                    if (rv == 0) {
+                        UFTP_DEBUG_MSG("server timeout\n");
+                    }
+                    if (rv <= 0) {
+                        continue;
+                    }
+                    if (delete_head.function >= SERV_ERR) {
+                        UFTP_DEBUG_MSG(
+                            "server error %i\n",
+                            delete_head.function
+                        );
+                        continue;
+                    }
+
+                    // do the delete
+                    send_func_only(sockfd, server_address, CLIE_DEL);
+                    rv = recv_packet(
+                        sockfd,
+                        server_address,
+                        &delete_head,
+                        packet_buffer
+                    );
+                    if (rv == 0) {
+                        UFTP_DEBUG_MSG("server timeout\n");
+                    }
+                    if (rv <= 0) {
+                        continue;
+                    }
+                    if (delete_head.function >= SERV_ERR) {
+                        UFTP_DEBUG_MSG(
+                            "server error %i\n",
+                            delete_head.function
+                        );
+                        continue;
+                    }
                 } else if (strncmp("set ", input_buffer + input_used, 4) == 0) {
                     input_used += 4;
                     StringView filename = {

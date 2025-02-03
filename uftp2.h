@@ -30,6 +30,8 @@ extern int UFTP_TIMEOUT_MS;
 #define CLIE_GET_FS 518
 #define CLIE_GET_FC 519
 
+#define CLIE_DEL 520
+
 #define SERV_SUC 0
 #define SERV_SUC_LS 1
 #define SERV_SUC_SET_FN 2
@@ -38,6 +40,7 @@ extern int UFTP_TIMEOUT_MS;
 #define SERV_SUC_WRITE_F 5
 #define SERV_SUC_GET_FS 6
 #define SERV_SUC_GET_FC 7
+#define SERV_SUC_DEL 8
 
 #define SERV_ERR 256
 #define SERV_ERR_LS 257
@@ -47,8 +50,9 @@ extern int UFTP_TIMEOUT_MS;
 #define SERV_ERR_WRITE_F 261
 #define SERV_ERR_GET_FS 262
 #define SERV_ERR_GET_FC 263
+#define SERV_ERR_DEL 264
 
-#define SERV_UNKNOWN_FUNC 262
+#define SERV_UNKNOWN_FUNC 265
 
 typedef struct __attribute__((packed)) {
     uint32_t packet_length;

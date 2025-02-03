@@ -21,24 +21,5 @@ control of what is happening on the server.
 
 Functions:
 0-255: Success codes
-0: operation completed successfully
 256-511: Error codes
-256: server error
-257: server unknown function
-258: bad file
-
-512: client exit
-    server gives a 0
-513: client ls
-    server packs ls in mount dir into n number of packets
-514: client set filename buffer
-    server puts the payload in its filename buffer
-515: client get file length
-    server sets file size in sequence_number
-516: client get file chunk
-    client specifies position in sequence_number. size is default max or smaller
-    if its last chunk.
-    server sends file chunk.
-517: client send file chunk
-    client specifies stream position in sequence_number, size is default max or
-    smaller if last chunk.
+512- : Function codes

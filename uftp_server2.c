@@ -49,6 +49,29 @@ int main(int argc, char** argv)
         int payload_bytes_recv = rv - (int)sizeof(PacketHeader);
 
         switch (packet_header.function) {
+        case CLIE_DEL: {
+            // this is devious work so suseptable to server destruction it is
+            // almost funny
+            char cmd_buff[UFTP_PAYLOAD_MAX_SIZE];
+            memset(cmd_buff, 0, UFTP_PAYLOAD_MAX_SIZE);
+            cmd_buff[0] = 'r';
+            cmd_buff[1] = 'm';
+            cmd_buff[2] = ' ';
+            memcpy(
+                cmd_buff + 3,
+                filename_buffer,
+                strnlen(filename_buffer, UFTP_PAYLOAD_MAX_SIZE)
+            );
+            String cout_o = String_new();
+            rv = get_shell_cmd_cout(cmd_buff, &cout_o);
+            String_free(&cout_o);
+            if (rv < 0) {
+                rv = send_func_only(bs.fd, &client_address, SERV_ERR_DEL);
+                break;
+            }
+            rv = send_func_only(bs.fd, &client_address, SERV_SUC_DEL);
+            break;
+        }
         case CLIE_WRITE_F: {
             FILE* fptr = fopen(filename_buffer, "w");
             if (fptr == NULL) {

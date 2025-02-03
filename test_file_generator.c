@@ -19,7 +19,7 @@ int main(int argv, char** argc)
         if (rand() % 100 == 0) {
             fputc('\n', fptr);
         } else {
-            fputc((rand() % ('z' - 'a')) + 'a', fptr);
+            fputc((rand() % sizeof(char)), fptr);
         }
         byte_count++;
     }
