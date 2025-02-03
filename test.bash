@@ -3,6 +3,10 @@ echo -en "\033[0m"
 make clean
 make
 
+./String_test
+./StringVector_test
+./uftp2_test
+
 ./scripts/gen_test.bash
 echo "test files generated in serv/ and clie/"
 
