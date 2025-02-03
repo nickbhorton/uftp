@@ -2,8 +2,10 @@ ls
 put 512b.clie
 put 1kb.clie
 put 1mb.clie
+put 100mb.clie
 get 512b.serv
 get 1kb.serv
 get 1mb.serv
+get 100mb.serv
 exit
 
